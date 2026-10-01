@@ -21,6 +21,10 @@ struct NetMessage: Codable {
     var name: String? = nil
     var trophies: Int? = nil
     var level: Int? = nil
+    /// The sender's castle, in the flat form of `CastleDesign.encoded`.
+    var design: [Int]? = nil
+    /// Special shot used, as `Ammo.rawValue`.
+    var ammo: Int? = nil
 }
 
 /// A two-player connection. All callbacks arrive on the main queue.

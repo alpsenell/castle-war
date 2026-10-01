@@ -29,6 +29,36 @@ Touch anywhere on the scene, pull back (down) and release, slingshot style:
 Wind changes every turn (arrow in the top plate, up means toward the target). The binoculars
 button orbits the enemy castle; drag to rotate, pinch to zoom.
 
+### Build your castle
+
+The castle you defend is your own design. The builder is a grid of 11 × 15 tiles seen from
+above, with a live 3D preview beside it. Six pieces cost stone: low and high walls (one tile),
+towers, tall towers and bastions (2 × 2), and the keep (3 × 3). A castle needs exactly one
+keep, at least 1,200 stone and at most 2,400. Tall towers and bastions unlock with campaign
+stars. Online, each player's design is sent at the start of the match and checked against
+these rules on arrival; anything that fails becomes the classic layout.
+
+Design matters: in computer-versus-computer tests against the classic layout, the ready-made
+castles won between 7 % and 83 % of matches.
+
+### Special shots, balloons and match twists
+
+| Mechanic | Rule |
+| --- | --- |
+| Cluster | Three smaller blasts in a row across the line of fire. |
+| Piercer | Carries on through the stone and goes off about 6.5 units inside. |
+| Homing | Steers toward the gold target on the way down. |
+| Balloons | One drifts over the river from time to time. A shot that passes within 2.8 units grabs it and flies on: Repair rebuilds up to 110 cells, Shield cuts the next blast against you to 60 % radius, Charge adds half a mega meter. |
+| Twists | Storm, still air, low gravity, mega rush and big blast change a whole match. They appear in campaign stages and in the daily siege. |
+
+Each side carries one of each special shot per match.
+
+### Campaign
+
+Twelve stages against the computer, each with its own castle, skill level and twist. A win
+earns one to three stars by how much of your castle is still standing (40 % and 60 % are the
+steps), opens the next stage, and counts toward the building pieces.
+
 ### What makes a turn matter
 
 | Mechanic | Rule |
@@ -41,7 +71,7 @@ button orbits the enemy castle; drag to rotate, pinch to zoom.
 ### Daily Siege
 
 A solo score attack: eight shots at a castle that does not shoot back. The castle, the winds
-and the gold targets come from the date, so every player gets the same siege that day and
+and the gold targets (and, some days, a twist) come from the date, so every player gets the same siege that day and
 scores are comparable. A shot scores 10 points per percent of damage, 50 for a critical and up
 to 50 for the current streak; bringing the castle under 20 % early adds 150 plus 75 per unused
 shot. Today's best and the all-time record are kept, and the first run of the day pays 60 XP.
@@ -75,7 +105,8 @@ every day.
 
 | Mode | How it connects |
 | --- | --- |
-| Play the computer | Computer opponent, three difficulty levels |
+| Campaign | Twelve stages against the computer |
+| Quick match | Computer opponent, three difficulty levels, random enemy castle |
 | Two players, one device | Pass-and-play |
 | Daily Siege | Solo score attack, same castle for everyone each day |
 | Online: nearby player | MultipeerConnectivity, same Wi-Fi or Bluetooth, no account |
@@ -96,10 +127,12 @@ switched from the main menu. The app name on the Home Screen is localized throug
 
 | File | Role |
 | --- | --- |
-| `Sources/Rules.swift` | Castle layout, ballistics, damage, gold target, mega meter, siege scoring, computer player. No rendering. |
+| `Sources/Rules.swift` | Castle designs and pieces, ballistics, damage, special shots, balloons, twists, campaign stages, siege scoring, computer player. No rendering. |
 | `Sources/World.swift` | SceneKit scene: terrain, castle meshes, rubble physics, effects |
-| `Sources/GameController.swift` | Turn flow, shot clock, cameras, pull-to-shoot input, online protocol |
-| `Sources/Views.swift` | SwiftUI app, HUD, menu, profile, lobby and result cards |
+| `Sources/Textures.swift` | Procedural stone, grass, water, roof and sky; the app ships no image files besides its icon |
+| `Sources/GameController.swift` | Turn flow, shot clock, cameras, pull-to-shoot input, castle builder, online protocol |
+| `Sources/Views.swift` | SwiftUI app and the in-match HUD |
+| `Sources/Menus.swift` | Menu, campaign map, castle builder, profile, settings, lobby and result cards |
 | `Sources/Profile.swift` | Level, trophies, leagues, streaks, missions and match rewards |
 | `Sources/Strings.swift` | Turkish and English text |
 | `Sources/Net.swift` | Game Center and nearby transports behind one protocol |
@@ -111,8 +144,12 @@ velocity and both devices run the same fixed-step simulation in `Rules.swift`. T
 mega meter and streaks are derived from that shared state, so they agree too. Rubble physics
 is cosmetic and may differ between devices.
 
-Debug builds accept two launch arguments for unattended testing: `-autoNearby` opens the
-nearby lobby at launch and `-autoPlay` lets the computer take this device's turns.
+The scene is physically based: one generated sky panorama is both the backdrop and the light
+source, with a sun casting cascaded shadows, ambient occlusion, HDR and a little bloom.
+
+Debug builds accept launch arguments for unattended testing: `-autoNearby` opens the nearby
+lobby at launch, `-autoPlay` lets the computer take this device's turns, and `-preset N` plays
+with ready-made castle N.
 
 ## Tuning
 

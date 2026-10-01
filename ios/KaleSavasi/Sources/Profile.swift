@@ -25,7 +25,7 @@ struct BallStyle: Identifiable {
 }
 
 struct MatchStats: Equatable {
-    var shots = 0, hits = 0, crits = 0, bestHit = 0, megas = 0, topStreak = 0
+    var shots = 0, hits = 0, crits = 0, bestHit = 0, megas = 0, topStreak = 0, pickups = 0, specials = 0
     var accuracy: Int { shots == 0 ? 0 : Int((Double(hits) / Double(shots) * 100).rounded()) }
 }
 
@@ -68,7 +68,8 @@ struct Mission: Identifiable, Equatable {
     static let pool = [
         Mission(id: "win", target: 1), Mission(id: "hits", target: 8), Mission(id: "crits", target: 2),
         Mission(id: "megas", target: 2), Mission(id: "bighit", target: 1), Mission(id: "siege", target: 1),
-        Mission(id: "streak", target: 4),
+        Mission(id: "streak", target: 4), Mission(id: "pickup", target: 1), Mission(id: "special", target: 2),
+        Mission(id: "stage", target: 1),
     ]
 
     /// Three missions per day, the same for every player.
@@ -92,6 +93,9 @@ struct Reward: Equatable {
     var totalTrophies = 0
     var missions: [Mission] = []
     // Daily siege only
+    /// Campaign only: stars for this win, and whether it beat the stage's earlier best.
+    var stars: Int?
+    var unlockedPiece: PieceKind?
     var siegeFirstToday = false
     var siegeNewBest = false
     var siegeBest = 0, siegeRecord = 0
@@ -107,6 +111,12 @@ struct Profile: Codable, Equatable {
     var ballStyle = 0
     var siegeDay = "", siegeBest = 0, siegeRecord = 0
     var missionDay = "", missionProgress: [String: Int] = [:], missionsDone: [String] = []
+    /// The player's castle in its flat form; empty means the classic layout.
+    var design: [Int] = []
+    /// Best stars per campaign stage, in stage order.
+    var stars: [Int] = []
+    var haptics = true
+    var seenHowTo = false
 
     static let storageKey = "profile.v1"
     /// Game Center leaderboards. Create them in App Store Connect with these IDs.
@@ -130,7 +140,24 @@ struct Profile: Codable, Equatable {
         missionDay = str(.missionDay)
         missionProgress = (try? c.decodeIfPresent([String: Int].self, forKey: .missionProgress)) ?? [:]
         missionsDone = (try? c.decodeIfPresent([String].self, forKey: .missionsDone)) ?? []
+        design = (try? c.decodeIfPresent([Int].self, forKey: .design)) ?? []
+        stars = (try? c.decodeIfPresent([Int].self, forKey: .stars)) ?? []
+        haptics = (try? c.decodeIfPresent(Bool.self, forKey: .haptics)) ?? true
+        seenHowTo = (try? c.decodeIfPresent(Bool.self, forKey: .seenHowTo)) ?? false
     }
+
+    /// The castle the player takes into battle.
+    var castle: CastleDesign { CastleDesign(encoded: design) ?? .classic }
+
+    var totalStars: Int { stars.reduce(0, +) }
+    func stars(for stage: Stage) -> Int { stage.id - 1 < stars.count ? stars[stage.id - 1] : 0 }
+    /// A stage opens once the one before it has been won.
+    func isOpen(_ stage: Stage) -> Bool { stage.id == 1 || (stage.id - 2 < stars.count && stars[stage.id - 2] > 0) }
+    var nextStage: Stage { Stage.all.first { stars(for: $0) == 0 } ?? Stage.all[Stage.all.count - 1] }
+
+    /// Campaign stars needed before a building piece can be used.
+    static func starsNeeded(_ kind: PieceKind) -> Int { kind == .tallTower ? 5 : kind == .bastion ? 12 : 0 }
+    func owns(_ kind: PieceKind) -> Bool { totalStars >= Profile.starsNeeded(kind) }
 
     static func xpToNext(_ level: Int) -> Int { 100 + 60 * (level - 1) }
 
@@ -196,7 +223,7 @@ struct Profile: Codable, Equatable {
         return today
     }
 
-    private mutating func advanceMissions(stats: MatchStats, won: Bool, siege: Bool, day: String) -> [Mission] {
+    private mutating func advanceMissions(stats: MatchStats, won: Bool, siege: Bool, stage: Bool = false, day: String) -> [Mission] {
         if missionDay != day { missionDay = day; missionProgress = [:]; missionsDone = [] }
         var completed: [Mission] = []
         for m in Mission.today(day) where !missionsDone.contains(m.id) {
@@ -209,6 +236,9 @@ struct Profile: Codable, Equatable {
             case "bighit": v = max(v, stats.bestHit >= Mission.bigHit ? 1 : 0)
             case "siege": v = max(v, siege ? 1 : 0)
             case "streak": v = max(v, stats.topStreak)
+            case "pickup": v += stats.pickups
+            case "special": v += stats.specials
+            case "stage": v += stage ? 1 : 0
             default: break
             }
             v = min(v, m.target)
@@ -231,8 +261,15 @@ struct Profile: Codable, Equatable {
     }
 
     /// Books a finished match and returns what it earned. `forfeit` is a match the player walked out of.
-    mutating func record(won: Bool, mode: RewardMode, stats: MatchStats, forfeit: Bool = false, now: Date = Date()) -> Reward {
+    mutating func record(won: Bool, mode: RewardMode, stats: MatchStats, forfeit: Bool = false, stage: Stage? = nil, stageStars: Int = 0, now: Date = Date()) -> Reward {
         var r = Reward()
+        if let stage, won {
+            let before = totalStars
+            while stars.count < stage.id { stars.append(0) }
+            stars[stage.id - 1] = max(stars[stage.id - 1], stageStars)
+            r.stars = stageStars
+            r.unlockedPiece = PieceKind.allCases.first { Profile.starsNeeded($0) > before && Profile.starsNeeded($0) <= totalStars }
+        }
         r.levelBefore = level
         r.progressBefore = levelProgress
         let leagueBefore = league
@@ -251,7 +288,7 @@ struct Profile: Codable, Equatable {
             var gain = 15.0 + (won ? 45 : 0) + Double(stats.accuracy) * 0.3 + Double(min(30, stats.crits * 6))
             if won { gain += Double(5 * min(streak, 5)) }
             r.xp = Int((gain * mode.xpFactor).rounded()) + (r.firstWin ? 50 : 0)
-            r.missions = advanceMissions(stats: stats, won: won, siege: false, day: today)
+            r.missions = advanceMissions(stats: stats, won: won, siege: false, stage: stage != nil && won, day: today)
             r.xp += r.missions.count * Mission.xp
         }
         r.trophies = won ? stake.win : -min(trophies, stake.loss)

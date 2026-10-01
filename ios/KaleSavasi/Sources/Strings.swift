@@ -41,6 +41,7 @@ enum Tx {
     static var onlineGameCenter: String { "Online: Game Center" }
     static var onlineNearby: String { p("Online: yakındaki oyuncu", "Online: nearby player") }
     static var localTwo: String { p("Aynı cihazda 2 kişi", "Two players, one device") }
+    static var localShort: String { p("2 kişi", "2 players") }
     static var language: String { p("Dil", "Language") }
 
     // MARK: Players and turns
@@ -165,6 +166,9 @@ enum Tx {
         case "bighit": return p("Tek atışta \(pct(Mission.bigHit)) hasar ver", "Deal \(pct(Mission.bigHit)) with one shot")
         case "siege": return p("Günün Kuşatması'nı oyna", "Play the Daily Siege")
         case "streak": return p("×\(m.target) seri yakala", "Reach a ×\(m.target) streak")
+        case "pickup": return p("Bir balon kap", "Grab a balloon")
+        case "special": return p("\(m.target) özel gülle kullan", "Use \(m.target) special shots")
+        case "stage": return p("Bir sefer bölümü kazan", "Win a campaign stage")
         default: return m.id
         }
     }
@@ -177,6 +181,124 @@ enum Tx {
     static var online: String { "Online" }
     static var gameCenterShort: String { "Game Center" }
     static var nearbyShort: String { p("Yakındaki", "Nearby") }
+
+    // MARK: Ammo, balloons, modifiers
+    static func ammo(_ a: Ammo) -> String {
+        switch a {
+        case .standard: return p("Gülle", "Ball")
+        case .cluster: return p("Saçma", "Cluster")
+        case .piercer: return p("Delici", "Piercer")
+        case .homing: return p("Güdümlü", "Homing")
+        }
+    }
+    static func ammoHint(_ a: Ammo) -> String {
+        switch a {
+        case .standard: return ""
+        case .cluster: return p("Saçma: yan yana üç patlama", "Cluster: three blasts side by side")
+        case .piercer: return p("Delici: duvarı geçip içeride patlar", "Piercer: goes through the wall, bursts inside")
+        case .homing: return p("Güdümlü: altın hedefe yönelir", "Homing: steers to the gold target")
+        }
+    }
+    static func pickup(_ k: PickupKind) -> String {
+        switch k {
+        case .repair: return p("Onarım", "Repair")
+        case .shield: return p("Kalkan", "Shield")
+        case .charge: return p("Mega şarj", "Mega charge")
+        }
+    }
+    static func grabbed(_ k: PickupKind) -> String { p("\(pickup(k)) kapıldı!", "\(pickup(k)) grabbed!") }
+    static func balloonHint(_ k: PickupKind) -> String { p("Balon: \(pickup(k)). İçinden geç, kap.", "Balloon: \(pickup(k)). Shoot through it.") }
+    static var shieldBroken: String { p("Kalkan kırıldı", "Shield broken") }
+    static func modifier(_ m: Modifier) -> String {
+        switch m {
+        case .none: return p("Standart", "Standard")
+        case .storm: return p("Fırtına", "Storm")
+        case .calm: return p("Durgun hava", "Still air")
+        case .lowGravity: return p("Hafif yerçekimi", "Low gravity")
+        case .megaRush: return p("Mega yağmuru", "Mega rush")
+        case .bigBlast: return p("Büyük patlama", "Big blast")
+        }
+    }
+    static func modifierHint(_ m: Modifier) -> String {
+        switch m {
+        case .none: return ""
+        case .storm: return p("Rüzgâr iki kat güçlü", "Wind is twice as strong")
+        case .calm: return p("Rüzgâr yok", "No wind")
+        case .lowGravity: return p("Gülleler daha uzağa gider", "Shots carry farther")
+        case .megaRush: return p("Mega iki kat hızlı dolar", "Mega fills twice as fast")
+        case .bigBlast: return p("Patlamalar daha geniş", "Blasts are wider")
+        }
+    }
+
+    // MARK: Campaign
+    static var campaign: String { p("Sefer", "Campaign") }
+    static func stage(_ n: Int) -> String { p("Bölüm \(n)", "Stage \(n)") }
+    static func campaignProgress(_ stage: Int, _ stars: Int, _ of: Int) -> String { p("Bölüm \(stage) · \(stars)/\(of) yıldız", "Stage \(stage) · \(stars)/\(of) stars") }
+    static var quickMatch: String { p("Hızlı maç", "Quick match") }
+    static var nextStage: String { p("Sonraki bölüm", "Next stage") }
+    static var locked: String { p("Kilitli", "Locked") }
+    static func stageWon(_ n: Int) -> String { p("Bölüm \(n) geçildi", "Stage \(n) cleared") }
+    static func pieceUnlocked(_ name: String) -> String { p("Yeni yapı parçası: \(name)", "New building piece: \(name)") }
+    static var campaignDone: String { p("Sefer tamamlandı!", "Campaign complete!") }
+
+    // MARK: Castle builder
+    static var buildCastle: String { p("Kaleni kur", "Build your castle") }
+    static func piece(_ k: PieceKind) -> String {
+        switch k {
+        case .wallLow: return p("Alçak duvar", "Low wall")
+        case .wallHigh: return p("Yüksek duvar", "High wall")
+        case .tower: return p("Kule", "Tower")
+        case .tallTower: return p("Yüksek kule", "Tall tower")
+        case .bastion: return p("Tabya", "Bastion")
+        case .keep: return p("İç kale", "Keep")
+        }
+    }
+    static var eraser: String { p("Sil", "Erase") }
+    static func stone(_ used: Int, _ of: Int) -> String { p("Taş \(used)/\(of)", "Stone \(used)/\(of)") }
+    static var save: String { p("Kaydet", "Save") }
+    static var classicLayout: String { p("Klasik", "Classic") }
+    static var clearAll: String { p("Temizle", "Clear") }
+    static var builderFront: String { p("ÖN (düşmana bakan)", "FRONT (faces the enemy)") }
+    static var builderBack: String { p("ARKA", "BACK") }
+    static var builderHint: String { p("Parça seç, ızgaraya dokun. Sahneyi sürükleyerek çevir.", "Pick a piece, tap the grid. Drag the scene to turn it.") }
+    static var saved: String { p("Kalen kaydedildi", "Castle saved") }
+    static func needStars(_ n: Int) -> String { p("\(n) sefer yıldızı gerekir", "Needs \(n) campaign stars") }
+    static func problem(_ pr: CastleDesign.Problem) -> String {
+        switch pr {
+        case .noKeep: return p("Bir iç kale yerleştirmelisin.", "Place a keep first.")
+        case .manyKeeps: return p("Yalnızca bir iç kale olabilir.", "Only one keep is allowed.")
+        case .tooSmall: return p("Kale çok küçük: en az \(CastleDesign.minimum) taş kullan.", "Too small: use at least \(CastleDesign.minimum) stone.")
+        case .overBudget: return p("Taş sınırı aşıldı.", "Over the stone limit.")
+        case .overlap: return p("Parçalar üst üste biniyor.", "Pieces overlap.")
+        }
+    }
+    static var noStone: String { p("Yeterli taş yok", "Not enough stone") }
+    static var noRoom: String { p("Buraya sığmıyor", "It does not fit here") }
+
+    // MARK: Settings, help, leaving
+    static var settings: String { p("Ayarlar", "Settings") }
+    static var sound: String { p("Ses", "Sound") }
+    static var haptics: String { p("Titreşim", "Vibration") }
+    static var on: String { p("Açık", "On") }
+    static var off: String { p("Kapalı", "Off") }
+    static var howToPlay: String { p("Nasıl oynanır", "How to play") }
+    static var gotIt: String { p("Anladım", "Got it") }
+    static var tips: [(String, String)] {
+        [
+            ("hand.draw.fill", p("Ekrana dokun, geri çek ve bırak. Çekiş uzunluğu gücü, sağa sola çekmek yönü belirler.", "Touch the screen, pull back and release. Pull length sets power; pulling sideways turns the cannon.")),
+            ("wind", p("Rüzgâr her tur değişir. Üstteki ok gülleyi ittiği yönü gösterir.", "Wind changes every turn. The arrow at the top shows which way it pushes the shot.")),
+            ("scope", p("Altın hedefin yakınına isabet kritik vuruştur: patlama büyür.", "A hit near the gold target is a critical: the blast grows.")),
+            ("bolt.fill", p("Hasar verdikçe MEGA dolar. Dolunca düğmeye bas, dev bir atış yap.", "Dealing damage fills MEGA. When it is full, tap the button for a giant shot.")),
+            ("circle.grid.cross.fill", p("Her maçta üç özel güllen var: Saçma, Delici, Güdümlü.", "You carry three special shots per match: Cluster, Piercer, Homing.")),
+            ("balloon.fill", p("Balonun içinden atış geçirirsen ödülü kaparsın: onarım, kalkan ya da mega şarj.", "Shoot through a balloon to grab its prize: repair, shield or mega charge.")),
+            ("building.columns.fill", p("Kaleni kendin kur. Kalesi %20'nin altına düşen kaybeder.", "Build your own castle. Whoever drops below 20% loses.")),
+        ]
+    }
+    static var quitTitle: String { p("Maçtan çıkılsın mı?", "Leave the match?") }
+    static var quitOnline: String { p("Online maçtan çıkmak yenilgi sayılır.", "Leaving an online match counts as a loss.") }
+    static var quitPlain: String { p("Bu maçtaki ilerleme kaybolur.", "Progress in this match will be lost.") }
+    static var leave: String { p("Çık", "Leave") }
+    static var stay: String { p("Devam et", "Keep playing") }
 
     // MARK: Online lobby
     static var gameCenterTitle: String { p("Game Center eşleşmesi", "Game Center match") }

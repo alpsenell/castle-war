@@ -19,6 +19,7 @@ enum Paint {
     static let red = Color(hex: 0xc62d1f), redDark = Color(hex: 0x8e1f15)
     static let blue = Color(hex: 0x1f5fc4), blueDark = Color(hex: 0x143f85)
     static let yellow = Color(hex: 0xf2cd37), yellowDark = Color(hex: 0xc49a0c)
+    static let green = Color(hex: 0x2f9e55)
     static func team(_ side: Int) -> Color { side == 0 ? red : blue }
     static func heavy(_ size: CGFloat) -> Font { .system(size: size, weight: .heavy, design: .rounded) }
     static func text(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font { .system(size: size, weight: weight, design: .rounded) }
@@ -51,8 +52,8 @@ struct ChunkyButton: ButtonStyle {
         configuration.label
             .font(Paint.heavy(size))
             .foregroundStyle(fg)
-            .lineLimit(1).minimumScaleFactor(0.8)
-            .padding(.horizontal, compact ? 14 : 18).padding(.vertical, compact ? 6 : 11)
+            .lineLimit(1).minimumScaleFactor(0.7)
+            .padding(.horizontal, compact ? 12 : 18).padding(.vertical, compact ? 6 : 11)
             .frame(maxWidth: fill ? .infinity : nil, alignment: .leading)
             .background {
                 ZStack {
@@ -116,13 +117,22 @@ struct RootView: View {
                     PullOverlay().ignoresSafeArea().allowsHitTesting(false)
                     HUDView()
                 }
-                if let t = game.toast { ToastView(text: t).transition(.opacity.combined(with: .scale(scale: 0.9))) }
                 switch game.screen {
-                case .menu: if game.showProfile { ProfileView() } else { MenuView() }
+                case .menu:
+                    switch game.panel {
+                    case .home: MenuView()
+                    case .profile: ProfileView()
+                    case .settings: SettingsView()
+                    case .howTo: HowToView()
+                    case .campaign: CampaignView()
+                    }
                 case .lobby: LobbyView()
                 case .over: if game.over != nil { OverView() }
-                case .playing: EmptyView()
+                case .builder: BuilderView()
+                case .playing: if game.confirmQuit { QuitView() }
                 }
+                // Last, so a message is never hidden behind a card.
+                if let t = game.toast { ToastView(text: t).transition(.opacity.combined(with: .scale(scale: 0.9))) }
             }
             .animation(.easeOut(duration: 0.2), value: game.toast)
             .onAppear { game.viewSize = geo.size }
@@ -136,17 +146,41 @@ struct RootView: View {
 
 // MARK: - In-game HUD
 
+/// The mega meter and streak badge shared by the health and score plates.
+struct ChargeRow: View {
+    let charge: Double
+    let streak: Int
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "bolt.fill").font(.system(size: 9, weight: .black)).foregroundStyle(charge >= 1 ? Paint.yellowDark : Paint.muted)
+            Meter(value: charge, color: Paint.yellow, height: 5)
+            if streak >= 2 {
+                HStack(spacing: 1) {
+                    Image(systemName: "flame.fill").font(.system(size: 10, weight: .bold))
+                    Text("×\(streak)").font(Paint.text(11, .heavy)).monospacedDigit()
+                }
+                .foregroundStyle(Paint.red)
+            }
+        }
+    }
+}
+
 struct HealthPlate: View {
     let name: String
     let pct: Double
     let color: Color
     let charge: Double
     let streak: Int
+    let shielded: Bool
     var body: some View {
         let whole = Int((pct * 100 + 1e-9).rounded(.down))
         VStack(spacing: 4) {
-            HStack(alignment: .firstTextBaseline) {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
                 Text(name).font(Paint.heavy(16)).foregroundStyle(color).lineLimit(1)
+                if shielded {
+                    Image(systemName: "shield.fill").font(.system(size: 12, weight: .bold)).foregroundStyle(Color(hex: 0x3a8fdc))
+                        .accessibilityLabel(Tx.pickup(.shield))
+                }
                 Spacer(minLength: 8)
                 Text(Tx.pct(whole)).font(Paint.heavy(19)).monospacedDigit().foregroundStyle(Paint.ink)
             }
@@ -160,17 +194,7 @@ struct HealthPlate: View {
                 .overlay(Capsule().strokeBorder(Paint.ink, lineWidth: 2))
             }
             .frame(height: 12)
-            HStack(spacing: 5) {
-                Image(systemName: "bolt.fill").font(.system(size: 9, weight: .black)).foregroundStyle(charge >= 1 ? Paint.yellowDark : Paint.muted)
-                Meter(value: charge, color: Paint.yellow, height: 5)
-                if streak >= 2 {
-                    HStack(spacing: 1) {
-                        Image(systemName: "flame.fill").font(.system(size: 10, weight: .bold))
-                        Text("×\(streak)").font(Paint.text(11, .heavy)).monospacedDigit()
-                    }
-                    .foregroundStyle(Paint.red)
-                }
-            }
+            ChargeRow(charge: charge, streak: streak)
         }
         .padding(.horizontal, 12).padding(.vertical, 6)
         .frame(width: 216)
@@ -202,17 +226,7 @@ struct ScorePlate: View {
                         .overlay(Capsule().strokeBorder(Paint.ink, lineWidth: 2))
                 }
             }
-            HStack(spacing: 5) {
-                Image(systemName: "bolt.fill").font(.system(size: 9, weight: .black)).foregroundStyle(charge >= 1 ? Paint.yellowDark : Paint.muted)
-                Meter(value: charge, color: Paint.yellow, height: 5)
-                if streak >= 2 {
-                    HStack(spacing: 1) {
-                        Image(systemName: "flame.fill").font(.system(size: 10, weight: .bold))
-                        Text("×\(streak)").font(Paint.text(11, .heavy)).monospacedDigit()
-                    }
-                    .foregroundStyle(Paint.red)
-                }
-            }
+            ChargeRow(charge: charge, streak: streak)
         }
         .padding(.horizontal, 12).padding(.vertical, 6)
         .frame(width: 216)
@@ -271,6 +285,53 @@ struct MegaButton: View {
     }
 }
 
+enum Icons {
+    static func ammo(_ a: Ammo) -> String {
+        switch a {
+        case .standard: return "circle.fill"
+        case .cluster: return "circle.hexagongrid.fill"
+        case .piercer: return "arrowshape.right.fill"
+        case .homing: return "location.north.line.fill"
+        }
+    }
+    static func modifier(_ m: Modifier) -> String {
+        switch m {
+        case .none: return "equal"
+        case .storm: return "wind"
+        case .calm: return "sun.max.fill"
+        case .lowGravity: return "arrow.up.to.line"
+        case .megaRush: return "bolt.fill"
+        case .bigBlast: return "burst.fill"
+        }
+    }
+    static func pickup(_ k: PickupKind) -> String { World.symbol(of: k) }
+}
+
+/// The three special shots. Each can be used once a match.
+struct AmmoBar: View {
+    @EnvironmentObject var game: GameController
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(Ammo.specials) { a in
+                let left = game.hud.stock[a.rawValue], on = game.ammo == a
+                Button { game.select(a) } label: {
+                    VStack(spacing: 1) {
+                        Image(systemName: Icons.ammo(a)).font(.system(size: 17, weight: .bold))
+                        Text(Tx.ammo(a)).font(Paint.text(10, .heavy)).lineLimit(1).minimumScaleFactor(0.7)
+                    }
+                    .foregroundStyle(Paint.ink)
+                    .frame(width: 58, height: 46)
+                    .modifier(Plate(radius: 11, fill: on ? Paint.yellow : .white))
+                    .opacity(left > 0 ? 1 : 0.35)
+                }
+                .disabled(left == 0)
+                .accessibilityLabel(Tx.ammoHint(a))
+                .accessibilityAddTraits(on ? .isSelected : [])
+            }
+        }
+    }
+}
+
 struct HUDView: View {
     @EnvironmentObject var game: GameController
     var body: some View {
@@ -280,7 +341,7 @@ struct HUDView: View {
                 if let score = h.score {
                     ScorePlate(score: score, taken: h.shotsTaken, charge: h.charge[0], streak: h.streak[0]).allowsHitTesting(false)
                 } else {
-                    HealthPlate(name: h.names[0], pct: h.pct[0], color: Paint.red, charge: h.charge[0], streak: h.streak[0]).allowsHitTesting(false)
+                    HealthPlate(name: h.names[0], pct: h.pct[0], color: Paint.red, charge: h.charge[0], streak: h.streak[0], shielded: h.shield[0]).allowsHitTesting(false)
                 }
                 Spacer(minLength: 8)
                 VStack(spacing: 2) {
@@ -288,6 +349,10 @@ struct HUDView: View {
                     HStack(spacing: 5) {
                         Image(systemName: "arrow.up").font(.system(size: 12, weight: .black)).rotationEffect(.degrees(h.windAngle))
                         Text(Tx.wind(h.windPower)).font(Paint.text(13, .semibold)).monospacedDigit()
+                        if h.modifier != .none {
+                            Text("·").font(Paint.text(13, .heavy))
+                            Label(Tx.modifier(h.modifier), systemImage: Icons.modifier(h.modifier)).font(Paint.text(12, .heavy)).foregroundStyle(Paint.yellow)
+                        }
                     }
                     if let t = game.timeLeft {
                         HStack(spacing: 5) {
@@ -305,7 +370,7 @@ struct HUDView: View {
                 .allowsHitTesting(false)
                 .accessibilityElement(children: .combine)
                 Spacer(minLength: 8)
-                HealthPlate(name: h.names[1], pct: h.pct[1], color: Paint.blue, charge: h.charge[1], streak: h.streak[1]).allowsHitTesting(false)
+                HealthPlate(name: h.names[1], pct: h.pct[1], color: Paint.blue, charge: h.charge[1], streak: h.streak[1], shielded: h.shield[1]).allowsHitTesting(false)
             }
             HStack(spacing: 10) {
                 Spacer()
@@ -313,13 +378,13 @@ struct HUDView: View {
                     ToolButton(icon: h.inspecting ? "scope" : "binoculars.fill", label: h.inspecting ? Tx.backToAim : Tx.inspect) { game.toggleInspect() }
                 }
                 ToolButton(icon: game.soundOn ? "speaker.wave.2.fill" : "speaker.slash.fill", label: game.soundOn ? Tx.mute : Tx.unmute) { game.soundOn.toggle() }
-                ToolButton(icon: "house.fill", label: Tx.mainMenu) { game.showMenu() }
+                ToolButton(icon: "house.fill", label: Tx.mainMenu) { game.askToQuit() }
             }
             Spacer()
             ZStack(alignment: .bottom) {
                 hint(h).allowsHitTesting(false)
                 if h.megaVisible {
-                    HStack { Spacer(); MegaButton() }
+                    HStack(alignment: .bottom) { AmmoBar(); Spacer(); MegaButton() }
                 }
             }
         }
@@ -330,7 +395,11 @@ struct HUDView: View {
         if h.canAim && game.pull == nil {
             VStack(spacing: 1) {
                 Text(game.megaArmed ? Tx.megaArmedHint : Tx.pullHint).font(Paint.heavy(15)).foregroundStyle(.white)
-                if h.hasTarget && !game.megaArmed {
+                if game.ammo != .standard {
+                    Text(Tx.ammoHint(game.ammo)).font(Paint.text(12, .bold)).foregroundStyle(Paint.yellow)
+                } else if let k = h.pickup, !game.megaArmed {
+                    Text(Tx.balloonHint(k)).font(Paint.text(12, .bold)).foregroundStyle(Color(hex: World.tint(of: k)))
+                } else if h.hasTarget && !game.megaArmed {
                     Text(Tx.goldHint).font(Paint.text(12, .bold)).foregroundStyle(Paint.yellow)
                 }
             }
@@ -381,13 +450,15 @@ struct ToastView: View {
     var body: some View {
         VStack {
             Text(text)
-                .font(Paint.heavy(32))
+                .font(Paint.heavy(30))
                 .foregroundStyle(.white)
                 .shadow(color: Paint.ink, radius: 0, x: 0, y: 3)
                 .shadow(color: Paint.ink, radius: 0, x: 2, y: 0)
                 .shadow(color: Paint.ink, radius: 0, x: -2, y: 0)
                 .shadow(color: Paint.ink, radius: 0, x: 0, y: -2)
                 .multilineTextAlignment(.center)
+                .lineLimit(2).minimumScaleFactor(0.6)
+                .padding(.horizontal, 60)
                 .padding(.top, 100)
             Spacer()
         }
@@ -395,409 +466,22 @@ struct ToastView: View {
     }
 }
 
-// MARK: - Menu and profile
-
-struct Card<Content: View>: View {
-    var width: CGFloat = 660
-    @ViewBuilder var content: Content
-    var body: some View {
-        ZStack {
-            Paint.ink.opacity(0.3).ignoresSafeArea()
-            content
-                .padding(.horizontal, 24).padding(.vertical, 18)
-                .frame(maxWidth: width)
-                .modifier(Plate(radius: 22))
-                .padding(14)
-        }
-    }
-}
-
-struct LevelBadge: View {
-    let level: Int
-    var size: CGFloat = 34
-    var body: some View {
-        Text("\(level)").font(Paint.heavy(size * 0.5)).monospacedDigit().foregroundStyle(.white)
-            .frame(width: size, height: size)
-            .background(Circle().fill(Paint.ink))
-    }
-}
-
-/// Level, trophies and win streak at a glance; opens the full profile.
-struct ProfileStrip: View {
+/// Asked before walking out of a match in progress.
+struct QuitView: View {
     @EnvironmentObject var game: GameController
     var body: some View {
-        let p = game.profile
-        Button { game.showProfile = true } label: {
-            HStack(spacing: 9) {
-                LevelBadge(level: p.level)
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 8) {
-                        Text(Tx.level(p.level)).font(Paint.heavy(13)).foregroundStyle(Paint.ink)
-                        Spacer(minLength: 0)
-                        if p.streak >= 2 {
-                            Label("\(p.streak)", systemImage: "flame.fill").labelStyle(.titleAndIcon)
-                                .font(Paint.text(12, .heavy)).foregroundStyle(Paint.red)
-                        }
-                        Label("\(p.trophies)", systemImage: "trophy.fill").labelStyle(.titleAndIcon)
-                            .font(Paint.text(12, .heavy)).foregroundStyle(Color(hex: p.league.tint))
-                    }
-                    Meter(value: p.levelProgress, color: Paint.blue)
-                }
-                Image(systemName: "chevron.right").font(.system(size: 11, weight: .black)).foregroundStyle(Paint.muted)
-            }
-            .padding(.horizontal, 10).padding(.vertical, 8)
-            .background(RoundedRectangle(cornerRadius: 12).fill(Paint.track.opacity(0.6)))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Paint.ink, lineWidth: 2))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(Tx.profile): \(Tx.level(p.level)), \(Tx.trophies(p.trophies)), \(Tx.league(p.league))")
-    }
-}
-
-/// Today's three missions with progress.
-struct MissionsBlock: View {
-    @EnvironmentObject var game: GameController
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(Tx.missions).font(Paint.heavy(13)).foregroundStyle(Paint.ink)
-            ForEach(game.missions) { m in
-                HStack(spacing: 6) {
-                    Image(systemName: m.done ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 12, weight: .bold)).foregroundStyle(m.done ? Paint.blue : Paint.muted)
-                    Text(m.title).font(Paint.text(12, .semibold)).foregroundStyle(m.done ? Paint.muted : Paint.ink)
-                        .strikethrough(m.done).lineLimit(1).minimumScaleFactor(0.75)
-                    Spacer(minLength: 4)
-                    Text("\(m.progress)/\(m.target)").font(Paint.text(11, .heavy)).monospacedDigit().foregroundStyle(Paint.muted)
-                }
-                .accessibilityElement(children: .combine)
-            }
-        }
-    }
-}
-
-struct Chip: View {
-    let title: String
-    let selected: Bool
-    let action: () -> Void
-    var body: some View {
-        Button(title, action: action)
-            .font(Paint.text(13, .bold))
-            .foregroundStyle(selected ? .white : Paint.ink)
-            .padding(.horizontal, 12).padding(.vertical, 5)
-            .background(Capsule().fill(selected ? Paint.ink : .white))
-            .overlay(Capsule().strokeBorder(Paint.ink, lineWidth: 2))
-            .accessibilityAddTraits(selected ? .isSelected : [])
-    }
-}
-
-struct MenuView: View {
-    @EnvironmentObject var game: GameController
-    var body: some View {
-        Card {
-            HStack(alignment: .center, spacing: 24) {
-                VStack(alignment: .leading, spacing: 9) {
-                    VStack(alignment: .leading, spacing: -13) {
-                        Text(Tx.logoTop).foregroundStyle(Paint.red)
-                        Text(Tx.logoBottom).foregroundStyle(Paint.blue).padding(.leading, 22)
-                    }
-                    .font(.system(size: 46, weight: .black, design: .rounded))
-                    .lineLimit(1).minimumScaleFactor(0.7)
-                    .shadow(color: Paint.ink, radius: 0, x: 0, y: 3)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(Tx.gameName)
-                    .accessibilityAddTraits(.isHeader)
-                    MissionsBlock()
-                    ProfileStrip()
-                    HStack(spacing: 6) {
-                        Text(Tx.language).font(Paint.text(13)).foregroundStyle(Paint.muted)
-                        ForEach(Language.allCases) { l in
-                            Chip(title: l.label, selected: game.language == l) { game.language = l }
-                        }
-                    }
-                }
-                .frame(maxWidth: 260, alignment: .leading)
-                VStack(alignment: .leading, spacing: 13) {
-                    Button(Tx.vsComputer) { game.playComputer() }
-                        .buttonStyle(ChunkyButton(color: Paint.red, dark: Paint.redDark))
-                    HStack(spacing: 6) {
-                        Text(Tx.difficulty).font(Paint.text(13)).foregroundStyle(Paint.muted)
-                        ForEach(Difficulty.allCases) { d in
-                            Chip(title: Tx.name(d), selected: game.difficulty == d) { game.difficulty = d }
-                        }
-                    }
-                    HStack(spacing: 10) {
-                        Button { game.playOnline(.gameCenter) } label: { Label(Tx.gameCenterShort, systemImage: "globe") }
-                            .buttonStyle(ChunkyButton(color: Paint.blue, dark: Paint.blueDark, size: 16))
-                            .accessibilityLabel(Tx.onlineGameCenter)
-                        Button { game.playOnline(.nearby) } label: { Label(Tx.nearbyShort, systemImage: "wifi") }
-                            .buttonStyle(ChunkyButton(color: Paint.blue, dark: Paint.blueDark, size: 16))
-                            .accessibilityLabel(Tx.onlineNearby)
-                    }
-                    Button(Tx.localTwo) { game.playLocal() }
-                        .buttonStyle(ChunkyButton(color: Paint.yellow, dark: Paint.yellowDark, fg: Paint.ink))
-                    Button { game.playSiege() } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "scope")
-                            VStack(alignment: .leading, spacing: 0) {
-                                Text(Tx.dailySiege)
-                                Text(game.profile.siegeToday().map(Tx.siegeToday) ?? Tx.siegePitch).font(Paint.text(11, .semibold)).opacity(0.85)
-                            }
-                        }
-                    }
-                    .buttonStyle(ChunkyButton(color: Paint.ink, dark: .black, fg: Paint.yellow, size: 16, compact: true))
-                }
-            }
-        }
-    }
-}
-
-struct StatTile: View {
-    let label: String
-    let value: String
-    var body: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(value).font(Paint.heavy(18)).monospacedDigit().foregroundStyle(Paint.ink).lineLimit(1).minimumScaleFactor(0.7)
-            Text(label).font(Paint.text(11, .semibold)).foregroundStyle(Paint.muted).lineLimit(1).minimumScaleFactor(0.7)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 10).padding(.vertical, 6)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Paint.track.opacity(0.6)))
-    }
-}
-
-struct ProfileView: View {
-    @EnvironmentObject var game: GameController
-    var body: some View {
-        let p = game.profile
-        Card {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text(Tx.profile).font(Paint.heavy(24)).foregroundStyle(Paint.ink)
-                    TextField(Tx.playerName, text: Binding(get: { game.profile.name }, set: { game.setName($0) }))
-                        .font(Paint.text(15, .heavy)).foregroundStyle(Paint.ink)
-                        .textInputAutocapitalization(.words).autocorrectionDisabled().submitLabel(.done)
-                        .padding(.horizontal, 10).padding(.vertical, 5)
-                        .frame(width: 190)
-                        .background(RoundedRectangle(cornerRadius: 9).fill(Paint.track.opacity(0.6)))
-                        .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Paint.ink, lineWidth: 2))
-                        .accessibilityLabel(Tx.playerName)
-                    Spacer()
-                    Button { game.showProfile = false } label: {
-                        Image(systemName: "xmark").font(.system(size: 14, weight: .black)).foregroundStyle(Paint.ink)
-                            .frame(width: 36, height: 32).modifier(Plate(radius: 10))
-                    }
-                    .accessibilityLabel(Tx.close)
-                }
-                HStack(alignment: .top, spacing: 20) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(spacing: 10) {
-                            LevelBadge(level: p.level, size: 46)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(Tx.level(p.level)).font(Paint.heavy(17)).foregroundStyle(Paint.ink)
-                                Meter(value: p.levelProgress, color: Paint.blue, height: 8)
-                                Text("\(Int(p.levelProgress * Double(Profile.xpToNext(p.level)))) / \(Profile.xpToNext(p.level)) XP")
-                                    .font(Paint.text(11, .semibold)).monospacedDigit().foregroundStyle(Paint.muted)
-                            }
-                        }
-                        HStack(spacing: 8) {
-                            Image(systemName: "trophy.fill").font(.system(size: 20, weight: .bold)).foregroundStyle(Color(hex: p.league.tint))
-                            VStack(alignment: .leading, spacing: 0) {
-                                Text("\(Tx.trophies(p.trophies)) · \(Tx.league(p.league))").font(Paint.heavy(14)).foregroundStyle(Paint.ink)
-                                if let next = p.league.next {
-                                    Text(Tx.nextLeague(next.floor - p.trophies, Tx.league(next))).font(Paint.text(11, .semibold)).foregroundStyle(Paint.muted)
-                                }
-                            }
-                        }
-                    }
-                    .frame(maxWidth: 250, alignment: .leading)
-                    Grid(horizontalSpacing: 8, verticalSpacing: 8) {
-                        GridRow {
-                            StatTile(label: Tx.wins, value: "\(p.wins)")
-                            StatTile(label: Tx.losses, value: "\(p.losses)")
-                            StatTile(label: Tx.accuracy, value: Tx.pct(p.accuracy))
-                        }
-                        GridRow {
-                            StatTile(label: Tx.winStreak, value: "\(p.streak)")
-                            StatTile(label: Tx.bestStreak, value: "\(p.bestStreak)")
-                            StatTile(label: Tx.dayStreak, value: Tx.days(p.dayStreak))
-                        }
-                    }
-                }
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(Tx.cannonballs).font(Paint.heavy(14)).foregroundStyle(Paint.ink)
-                    HStack(spacing: 10) {
-                        ForEach(BallStyle.all) { b in
-                            let owned = p.owns(b), selected = p.ballStyle == b.id
-                            Button { game.selectBall(b.id) } label: {
-                                HStack(spacing: 7) {
-                                    ZStack {
-                                        Circle().fill(Color(hex: b.ball)).frame(width: 24, height: 24)
-                                            .overlay(Circle().strokeBorder(Color(hex: b.trail), lineWidth: 3))
-                                        if !owned { Image(systemName: "lock.fill").font(.system(size: 10, weight: .black)).foregroundStyle(.white) }
-                                    }
-                                    VStack(alignment: .leading, spacing: 0) {
-                                        Text(Tx.ball(b.id)).font(Paint.text(13, .heavy)).foregroundStyle(Paint.ink)
-                                        if !owned { Text(Tx.level(b.level)).font(Paint.text(10, .semibold)).foregroundStyle(Paint.muted) }
-                                    }
-                                }
-                                .padding(.horizontal, 10).padding(.vertical, 6)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(RoundedRectangle(cornerRadius: 10).fill(selected ? Paint.yellow.opacity(0.45) : Paint.track.opacity(0.6)))
-                                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(selected ? Paint.ink : .clear, lineWidth: 2))
-                                .opacity(owned ? 1 : 0.6)
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(!owned)
-                            .accessibilityAddTraits(selected ? .isSelected : [])
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// MARK: - Lobby and result cards
-
-struct LobbyView: View {
-    @EnvironmentObject var game: GameController
-    var body: some View {
-        Card(width: 460) {
-            VStack(alignment: .leading, spacing: 14) {
-                Text(game.lobby.kind == .gameCenter ? Tx.gameCenterTitle : Tx.nearbyTitle)
-                    .font(Paint.heavy(24)).foregroundStyle(Paint.ink)
-                HStack(spacing: 10) {
-                    if game.lobby.busy { ProgressView().tint(Paint.ink) }
-                    Text(game.lobby.status.isEmpty ? Tx.preparing : game.lobby.status)
-                        .font(Paint.text(15)).foregroundStyle(Paint.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                HStack(spacing: 14) {
-                    Button(Tx.retry) { game.playOnline(game.lobby.kind) }
-                        .buttonStyle(ChunkyButton(color: Paint.blue, dark: Paint.blueDark, size: 16))
-                    Button(Tx.cancel) { game.showMenu() }
-                        .buttonStyle(ChunkyButton(color: Paint.yellow, dark: Paint.yellowDark, fg: Paint.ink, size: 16))
-                }
-                .padding(.top, 4)
-            }
-        }
-    }
-}
-
-/// What the match earned: XP with the level bar filling, trophies, and any bonus worth calling out.
-struct RewardPanel: View {
-    let reward: Reward
-    var showTrophies = true
-    @State private var progress = 0.0
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 12) {
-                Text(Tx.xpGain(reward.xp)).font(Paint.heavy(20)).monospacedDigit().foregroundStyle(Paint.blue)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(Tx.level(reward.levelAfter)).font(Paint.text(12, .heavy)).foregroundStyle(Paint.ink)
-                    Meter(value: progress, color: Paint.blue, height: 8)
-                }
-                if showTrophies {
-                    HStack(spacing: 4) {
-                        Image(systemName: "trophy.fill").font(.system(size: 15, weight: .bold))
-                        Text("\(reward.trophies >= 0 ? "+" : "−")\(abs(reward.trophies))").font(Paint.heavy(18)).monospacedDigit()
-                    }
-                    .foregroundStyle(Color(hex: League.of(reward.totalTrophies).tint))
-                }
-            }
-            ForEach(notes, id: \.self) { n in
-                Label(n, systemImage: "star.fill").font(Paint.text(12, .bold)).foregroundStyle(Paint.yellowDark)
-            }
-        }
-        .padding(.horizontal, 12).padding(.vertical, 9)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Paint.track.opacity(0.6)))
-        .onAppear {
-            progress = reward.levelAfter > reward.levelBefore ? 0 : reward.progressBefore
-            withAnimation(.easeOut(duration: 1.1).delay(0.35)) { progress = reward.progressAfter }
-        }
-    }
-
-    private var notes: [String] {
-        var out: [String] = []
-        if reward.levelAfter > reward.levelBefore {
-            var line = Tx.levelUp(reward.levelAfter)
-            if let b = reward.unlockedBall { line += " · " + Tx.unlocked(Tx.ball(b)) }
-            out.append(line)
-        }
-        if let l = reward.promotedTo { out.append(Tx.promoted(Tx.league(l))) }
-        if reward.firstWin { out.append(Tx.firstWin) }
-        if reward.siegeFirstToday { out.append(Tx.siegeFirst) }
-        for m in reward.missions { out.append(Tx.missionDone(Tx.mission(m))) }
-        return Array(out.prefix(5))      // the card has room for five lines
-    }
-}
-
-/// Both players' numbers side by side; the better one in each row is set in ink, the other muted.
-struct CompareTable: View {
-    let names: [String]
-    let stats: [MatchStats]
-    var body: some View {
-        Grid(horizontalSpacing: 10, verticalSpacing: 4) {
-            GridRow {
-                Text(names[0]).font(Paint.heavy(13)).foregroundStyle(Paint.red).lineLimit(1).minimumScaleFactor(0.7)
-                Text("")
-                Text(names[1]).font(Paint.heavy(13)).foregroundStyle(Paint.blue).lineLimit(1).minimumScaleFactor(0.7)
-            }
-            row(Tx.accuracy, stats[0].accuracy, stats[1].accuracy) { Tx.pct($0) }
-            row(Tx.bestHit, stats[0].bestHit, stats[1].bestHit) { $0 > 0 ? "−" + Tx.pct($0) : "–" }
-            row(Tx.criticals, stats[0].crits, stats[1].crits) { "\($0)" }
-        }
-        .padding(.horizontal, 12).padding(.vertical, 9)
-        .frame(maxWidth: .infinity)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Paint.track.opacity(0.6)))
-    }
-
-    private func row(_ label: String, _ a: Int, _ b: Int, _ text: (Int) -> String) -> some View {
-        GridRow {
-            Text(text(a)).font(Paint.heavy(16)).monospacedDigit().foregroundStyle(a >= b ? Paint.ink : Paint.muted)
-            Text(label).font(Paint.text(11, .semibold)).foregroundStyle(Paint.muted).lineLimit(1).minimumScaleFactor(0.7)
-            Text(text(b)).font(Paint.heavy(16)).monospacedDigit().foregroundStyle(b >= a ? Paint.ink : Paint.muted)
-        }
-    }
-}
-
-struct OverView: View {
-    @EnvironmentObject var game: GameController
-    var body: some View {
-        let o = game.over
-        Card(width: 640) {
+        Card(width: 420) {
             VStack(alignment: .leading, spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(o?.title ?? "").font(.system(size: 32, weight: .black, design: .rounded)).foregroundStyle(Paint.ink)
-                    Text(o?.detail ?? "").font(Paint.text(14)).foregroundStyle(Paint.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                HStack(alignment: .top, spacing: 10) {
-                    if let o, o.isSiege, let r = o.reward {
-                        VStack(spacing: 8) {
-                            HStack(spacing: 8) {
-                                StatTile(label: Tx.todayBest, value: "\(r.siegeBest)")
-                                StatTile(label: Tx.record, value: "\(r.siegeRecord)")
-                            }
-                            if r.siegeNewBest {
-                                Label(Tx.newBest, systemImage: "star.fill").font(Paint.text(13, .heavy)).foregroundStyle(Paint.yellowDark)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                        }
-                    } else if let o, let mine = o.stats, let theirs = o.rivalStats, o.names.count == 2 {
-                        CompareTable(names: o.names, stats: o.side == 0 ? [mine, theirs] : [theirs, mine])
-                    }
-                    if let r = o?.reward { RewardPanel(reward: r, showTrophies: o?.isSiege != true).frame(maxWidth: .infinity) }
-                }
+                Text(Tx.quitTitle).font(Paint.heavy(24)).foregroundStyle(Paint.ink)
+                Text(game.quitWarning)
+                    .font(Paint.text(14)).foregroundStyle(Paint.muted)
                 HStack(spacing: 14) {
-                    Button(o?.waiting == true ? Tx.waitingOpponent : o?.isSiege == true ? Tx.tryAgain : Tx.playAgain) { game.rematch() }
+                    Button(Tx.stay) { game.confirmQuit = false }
+                        .buttonStyle(ChunkyButton(color: Paint.blue, dark: Paint.blueDark, size: 16))
+                    Button(Tx.leave) { game.showMenu() }
                         .buttonStyle(ChunkyButton(color: Paint.red, dark: Paint.redDark, size: 16))
-                        .disabled(game.over?.waiting == true)
-                        .opacity(game.over?.waiting == true ? 0.6 : 1)
-                    Button(Tx.mainMenu) { game.showMenu() }
-                        .buttonStyle(ChunkyButton(color: Paint.yellow, dark: Paint.yellowDark, fg: Paint.ink, size: 16))
                 }
-                .padding(.top, 5)
+                .padding(.top, 6)
             }
         }
     }

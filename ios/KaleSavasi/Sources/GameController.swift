@@ -2,15 +2,18 @@ import SwiftUI
 import SceneKit
 import QuartzCore
 
-enum Screen { case menu, lobby, playing, over }
-enum Mode { case ai, local, online, challenge }
+enum Screen { case menu, lobby, playing, over, builder }
+enum Mode { case ai, local, online, challenge, campaign }
 enum OnlineKind { case gameCenter, nearby }
+/// Which card the menu screen shows.
+enum Panel { case home, profile, settings, howTo, campaign }
 
 struct HUD: Equatable {
     var names = ["", ""]
     var pct = [1.0, 1.0]
     var charge = [0.0, 0.0]
     var streak = [0, 0]
+    var shield = [false, false]
     var turnText = ""
     var turnSide = 0
     var finished = false
@@ -23,6 +26,10 @@ struct HUD: Equatable {
     var megaReady = false
     var megaCharge = 0.0
     var hasTarget = false
+    /// Special shots left for the player who is aiming, indexed by `Ammo.rawValue`.
+    var stock = [0, 0, 0, 0]
+    var pickup: PickupKind?
+    var modifier = Modifier.none
     /// Daily siege only: running score and how many shots have been taken.
     var score: Int?
     var shotsTaken = 0
@@ -48,6 +55,8 @@ struct OverInfo: Equatable {
     var names: [String] = []
     var side = 0
     var isSiege = false
+    /// Campaign: the win opened another stage to move on to.
+    var hasNextStage = false
 }
 
 struct MissionRow: Identifiable {
@@ -70,6 +79,7 @@ final class GameController: NSObject, ObservableObject {
     private let sfx = Sfx()
 
     @Published var screen = Screen.menu
+    @Published var panel = Panel.home
     @Published var hud = HUD()
     @Published var pull: Pull?
     @Published var ghost: CGSize?
@@ -79,21 +89,30 @@ final class GameController: NSObject, ObservableObject {
     @Published var difficulty = Difficulty.orta
     @Published var soundOn = true { didSet { sfx.enabled = soundOn } }
     @Published var megaArmed = false
+    /// The special shot picked for the next pull.
+    @Published var ammo = Ammo.standard
     /// Seconds left on the shot clock, or nil when the turn is not timed.
     @Published var timeLeft: Int?
     @Published var profile = Profile.load()
-    @Published var showProfile = false
     @Published var language = Tx.lang { didSet { Tx.set(language); refreshHUD() } }
+    @Published var confirmQuit = false
+    // Castle builder
+    @Published var draft = CastleDesign()
+    @Published var tool: PieceKind? = .wallLow
+    @Published var erasing = false
+    @Published var builderNote: String?
     var viewSize = CGSize(width: 844, height: 390)
 
     private enum Phase { case menu, aim, flight, impact, over }
     private enum Driver { case human, computer, remote }
     private enum Cam { case menu, aim, target, follow, impact }
-    private struct Flight { var side: Int; var res: ShotResult; var path: [Vec3]; var i = 0.0 }
+    private struct Flight { var side: Int; var res: ShotResult; var path: [Vec3]; var i = 0.0; var popped = false }
 
     private var mode = Mode.ai
     private var me = 0
-    private var battle = Battle(seed: UInt32.random(in: 0...UInt32.max), first: 0)
+    private var battle = Battle(seed: 1, first: 0)
+    private var stage: Stage?
+    private var aiLevel = Difficulty.orta
     private var aims = [Aim(), Aim()]
     private var lastPull: [CGSize?] = [nil, nil]
     private var stats = [MatchStats(), MatchStats()]
@@ -106,9 +125,10 @@ final class GameController: NSObject, ObservableObject {
     private var impactT = 0.0, slowT = 0.0, ts = 1.0, turnT = 0.0
     private var skipped = false
     private var score = 0, shotsTaken = 0, clearBonus = 0
-    /// Who the online opponent says they are. Display only.
-    private var rival: (name: String, trophies: Int, level: Int)?
+    /// Who the online opponent says they are, and the castle they brought.
+    private var rival: (name: String, trophies: Int, level: Int, design: CastleDesign)?
     private var toastWork: DispatchWorkItem?
+    private var lastTile: (Int, Int)?
 
     private var cam = Cam.menu
     private var camSide = 0
@@ -139,8 +159,16 @@ final class GameController: NSObject, ObservableObject {
 
     override init() {
         super.init()
-        world.load(battle)
+        #if DEBUG
+        // "-preset N" plays with ready-made castle N instead of the saved one (not stored).
+        if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-preset"), i + 1 < ProcessInfo.processInfo.arguments.count,
+           let n = Int(ProcessInfo.processInfo.arguments[i + 1]), Presets.all.indices.contains(n) {
+            profile.design = Presets.all[n].encoded
+        }
+        #endif
+        resetBackdrop()
         world.onSplash = { [weak self] in self?.sfx.play(.splash) }
+        if !profile.seenHowTo { panel = .howTo }
         let l = CADisplayLink(target: self, selector: #selector(tick(_:)))
         l.add(to: .main, forMode: .common)
         link = l
@@ -158,17 +186,40 @@ final class GameController: NSObject, ObservableObject {
         profile.missionRows().map { MissionRow(id: $0.mission.id, title: Tx.mission($0.mission), progress: $0.progress, target: $0.mission.target, done: $0.done) }
     }
 
+    /// The scene behind the menu: the player's own castle facing a random one.
+    private func resetBackdrop() {
+        let seed = UInt32.random(in: 0...UInt32.max)
+        battle = Battle(seed: seed, first: 0, designs: [profile.castle, Presets.pick(seed)])
+        world.load(battle)
+    }
+
+    private func thump(_ style: UIImpactFeedbackGenerator.FeedbackStyle) {
+        if profile.haptics { UIImpactFeedbackGenerator(style: style).impactOccurred() }
+    }
+
     // MARK: Menu actions
 
-    func playComputer() { sfx.play(.tick); startGame(.ai) }
-    func playLocal() { sfx.play(.tick); startGame(.local) }
-    func playSiege() { sfx.play(.tick); startGame(.challenge, seed: Challenge.seed(day: Profile.dayString())) }
+    func playComputer() {
+        sfx.play(.tick)
+        let seed = UInt32.random(in: 0...UInt32.max)
+        aiLevel = difficulty
+        startGame(.ai, seed: seed, designs: [profile.castle, Presets.pick(seed)])
+    }
 
-    func setName(_ raw: String) {
-        let clean = Profile.cleanName(raw)
-        guard clean != profile.name else { return }
-        profile.name = clean
-        if !clean.isEmpty { profile.save() }
+    func playLocal() { sfx.play(.tick); startGame(.local, designs: [profile.castle, profile.castle]) }
+
+    func playSiege() {
+        sfx.play(.tick)
+        let seed = Challenge.seed(day: Profile.dayString())
+        let twist = Modifier.allCases[Int((seed / 7) % UInt32(Modifier.allCases.count))]
+        startGame(.challenge, seed: seed, designs: [profile.castle, Presets.pick(seed)], rules: MatchRules(twist, pickups: false))
+    }
+
+    func playStage(_ s: Stage) {
+        guard profile.isOpen(s) else { return }
+        sfx.play(.tick)
+        aiLevel = s.difficulty
+        startGame(.campaign, designs: [profile.castle, s.design], rules: MatchRules(s.modifier), stage: s)
     }
 
     func playOnline(_ kind: OnlineKind) {
@@ -185,6 +236,13 @@ final class GameController: NSObject, ObservableObject {
         t.start()
     }
 
+    var quitWarning: String { mode == .online ? Tx.quitOnline : Tx.quitPlain }
+
+    /// The home button during a match: ask first, since leaving can cost a loss.
+    func askToQuit() {
+        if screen == .playing && phase != .over { confirmQuit = true } else { showMenu() }
+    }
+
     func showMenu() {
         // Walking out of an online match that is under way counts as a loss.
         if mode == .online, screen == .playing, phase != .over, phase != .menu, battle.shot >= 2, !oppGone {
@@ -193,27 +251,31 @@ final class GameController: NSObject, ObservableObject {
             p.save()
             profile = p
         }
+        let wasPlaying = screen != .menu
         stopNet()
         phase = .menu
         cam = .menu
         menuA = Double(atan2(camPos.x, camPos.z))
-        pull = nil; ghost = nil; over = nil; timeLeft = nil; megaArmed = false
+        pull = nil; ghost = nil; over = nil; timeLeft = nil; megaArmed = false; ammo = .standard; confirmQuit = false
         world.hidePreview()
-        world.showTarget(nil)
         world.endBall()
         screen = .menu
+        panel = .home
+        if wasPlaying { resetBackdrop() }
     }
 
     func rematch() {
-        if mode == .online {
+        switch mode {
+        case .online:
             guard net != nil, !oppGone else { over?.detail = Tx.rematchGone; return }
             wantAgain = true
             net?.send(NetMessage(t: "again", round: round), reliable: true)
             if isHost && oppAgain { hostNewRound() } else { over?.waiting = true }
-        } else if mode == .challenge {
-            playSiege()
-        } else {
-            startGame(mode, first: mode == .local ? 1 - battle.first : 0)
+        case .challenge: playSiege()
+        case .campaign:
+            if over?.hasNextStage == true { playStage(profile.nextStage) } else if let s = stage { playStage(s) }
+        case .ai: playComputer()
+        case .local: startGame(.local, first: 1 - battle.first, designs: [profile.castle, profile.castle])
         }
     }
 
@@ -231,7 +293,16 @@ final class GameController: NSObject, ObservableObject {
     func toggleMega() {
         guard phase == .aim, driver == .human, hud.megaReady else { return }
         megaArmed.toggle()
+        if megaArmed { ammo = .standard }
         sfx.play(megaArmed ? .charged : .tick)
+    }
+
+    /// Picks a special shot for the next pull; tapping the same one again puts it back.
+    func select(_ a: Ammo) {
+        guard phase == .aim, driver == .human, hud.stock[a.rawValue] > 0 else { return }
+        ammo = ammo == a ? .standard : a
+        if ammo != .standard { megaArmed = false }
+        sfx.play(.tick)
     }
 
     func selectBall(_ id: Int) {
@@ -241,28 +312,121 @@ final class GameController: NSObject, ObservableObject {
         sfx.play(.tick)
     }
 
+    func setName(_ raw: String) {
+        let clean = Profile.cleanName(raw)
+        guard clean != profile.name else { return }
+        profile.name = clean
+        if !clean.isEmpty { profile.save() }
+    }
+
+    func setHaptics(_ on: Bool) { profile.haptics = on; profile.save(); if on { thump(.light) } }
+
+    func closeHowTo() {
+        if !profile.seenHowTo { profile.seenHowTo = true; profile.save() }
+        panel = .home
+    }
+
+    // MARK: Castle builder
+
+    func openBuilder() {
+        sfx.play(.tick)
+        draft = profile.castle
+        tool = .wallLow; erasing = false; builderNote = nil; lastTile = nil
+        screen = .builder
+        cam = .target
+        camSide = 1                       // the target camera looks at the other side's castle: ours
+        orbitA = 0.75; orbitH = 30; orbitR = 54; orbitR0 = 54
+        world.preview(draft)
+    }
+
+    func pick(tool kind: PieceKind?) {
+        guard kind == nil || profile.owns(kind!) else { builderNote = Tx.needStars(Profile.starsNeeded(kind!)); return }
+        tool = kind
+        erasing = kind == nil
+        builderNote = nil
+        sfx.play(.tick)
+    }
+
+    /// A touch on the builder grid. `fresh` is the first touch of a stroke; dragging on only lays walls or erases.
+    func paint(row: Int, col: Int, fresh: Bool) {
+        guard screen == .builder, row >= 0, row < CastleDesign.rows, col >= 0, col < CastleDesign.cols else { return }
+        if !fresh, let t = lastTile, t == (row, col) { return }
+        lastTile = (row, col)
+        if erasing {
+            if let i = draft.piece(atRow: row, col: col) { draft.pieces.remove(at: i); draftChanged() }
+            return
+        }
+        guard let kind = tool else { return }
+        if !fresh && kind.span > 1 { return }
+        let n = kind.span
+        let tx = min(max(row - (n - 1) / 2, 0), CastleDesign.rows - n), tz = min(max(col - (n - 1) / 2, 0), CastleDesign.cols - n)
+        var next = draft
+        if n == 1, let i = next.piece(atRow: row, col: col) {
+            let old = next.pieces[i]
+            if old.kind == kind { if fresh { next.pieces.remove(at: i); draft = next; draftChanged() }; return }   // tap again to take it away
+            guard old.kind.span == 1 else { if fresh { builderNote = Tx.noRoom }; return }
+            next.pieces.remove(at: i)                                                                              // swap one wall for the other
+        }
+        if kind == .keep { next.pieces.removeAll { $0.kind == .keep } }      // there is one keep: placing it again moves it
+        guard next.fits(kind, row: tx, col: tz) else { if fresh { builderNote = Tx.noRoom }; return }
+        next.pieces.append(Piece(kind: kind, tx: tx, tz: tz))
+        guard next.cost <= CastleDesign.budget else { builderNote = Tx.noStone; return }
+        draft = next
+        draftChanged()
+    }
+
+    func strokeEnded() { lastTile = nil }
+
+    private func draftChanged() {
+        builderNote = nil
+        world.preview(draft)
+    }
+
+    func loadDraft(_ d: CastleDesign) { draft = d; draftChanged(); sfx.play(.tick) }
+
+    func saveCastle() {
+        if let pr = draft.problem { builderNote = Tx.problem(pr); return }
+        profile.design = draft.encoded
+        profile.save()
+        sfx.play(.charged)
+        closeBuilder()
+        show(toast: Tx.saved)
+    }
+
+    func closeBuilder() {
+        screen = .menu
+        panel = .home
+        cam = .menu
+        menuA = Double(atan2(camPos.x, camPos.z))
+        resetBackdrop()
+    }
+
     // MARK: Turn flow
 
-    private func startGame(_ m: Mode, seed: UInt32? = nil, me: Int = 0, first: Int = 0, round: Int = 1) {
+    private func startGame(_ m: Mode, seed: UInt32? = nil, me: Int = 0, first: Int = 0, round: Int = 1,
+                           designs: [CastleDesign], rules: MatchRules = MatchRules(), stage: Stage? = nil) {
         mode = m
         self.me = me
         self.round = round
+        self.stage = stage
         oppGone = false; wantAgain = false; oppAgain = false; pendingShot = nil
         flight = nil; plan = nil; remoteAim = nil; ts = 1; slowT = 0
-        battle = Battle(seed: seed ?? UInt32.random(in: 0...UInt32.max), first: first)
+        battle = Battle(seed: seed ?? UInt32.random(in: 0...UInt32.max), first: first, designs: designs, rules: rules)
         world.load(battle)
         aims = [Aim(), Aim()]
         lastPull = [nil, nil]
         stats = [MatchStats(), MatchStats()]
         score = 0; shotsTaken = 0; clearBonus = 0
-        pull = nil; over = nil; toast = nil; showProfile = false
+        pull = nil; over = nil; toast = nil; confirmQuit = false
         screen = .playing
+        panel = .home
         beginTurn()
+        if rules.modifier != .none { show(toast: Tx.modifier(rules.modifier) + ": " + Tx.modifierHint(rules.modifier)) }
     }
 
     private func names() -> [String] {
         switch mode {
-        case .ai: return [Tx.you, Tx.computer]
+        case .ai, .campaign: return [Tx.you, Tx.computer]
         case .online:
             let them = (rival?.name).flatMap { $0.isEmpty ? nil : $0 } ?? Tx.opponent
             return me == 0 ? [Tx.you, them] : [them, Tx.you]
@@ -273,7 +437,7 @@ final class GameController: NSObject, ObservableObject {
 
     private func driverOf(_ side: Int) -> Driver {
         switch mode {
-        case .ai: return side == 0 ? .human : .computer
+        case .ai, .campaign: return side == 0 ? .human : .computer
         case .local, .challenge: return .human
         case .online: return side == me ? .human : .remote
         }
@@ -290,16 +454,17 @@ final class GameController: NSObject, ObservableObject {
         driver = driverOf(s)
         wind = battle.wind()
         plan = nil; remoteAim = nil; pull = nil
-        megaArmed = false; skipped = false
+        megaArmed = false; ammo = .standard; skipped = false
         cam = .aim; camSide = s
         ghost = driver == .human ? lastPull[s] : nil
         world.showTarget(battle.goldTarget())
+        world.showPickup(battle.pickup)
         turnT = K.turnSeconds
         // Shot clock: only where a person on the other side is waiting.
         timeLeft = driver == .human && (mode == .online || mode == .local) && !autoPlay ? Int(K.turnSeconds) : nil
         refreshHUD()
         switch driver {
-        case .computer: planComputerShot(side: s, difficulty: difficulty)
+        case .computer: planComputerShot(side: s, difficulty: aiLevel)
         case .remote: checkRemote()
         case .human: if autoPlay { planComputerShot(side: s, difficulty: .orta) }
         }
@@ -308,6 +473,7 @@ final class GameController: NSObject, ObservableObject {
     private func planComputerShot(side s: Int, difficulty: Difficulty) {
         let c = Computer.choose(battle: battle, side: s, difficulty: difficulty, wind: wind)
         megaArmed = c.mega
+        ammo = c.ammo
         plan = (0, aims[s], c.aim)
     }
 
@@ -315,25 +481,26 @@ final class GameController: NSObject, ObservableObject {
         guard phase == .aim, !oppGone else { return }
         let s = battle.turn, l = Ballistics.launch(side: s, aim: aims[s])
         let mega = megaArmed && battle.charge[s] >= 1
+        let special = !mega && battle.stock[s][ammo.rawValue] > 0 ? ammo : Ammo.standard
         if mode == .online && driver == .human {
-            net?.send(NetMessage(t: "shot", round: round, k: battle.shot, p: bits(l.p0), v: bits(l.v0), yaw: aims[s].yaw, power: aims[s].power, mega: mega), reliable: true)
+            net?.send(NetMessage(t: "shot", round: round, k: battle.shot, p: bits(l.p0), v: bits(l.v0), yaw: aims[s].yaw, power: aims[s].power, mega: mega, ammo: special.rawValue), reliable: true)
         }
-        launch(side: s, p0: l.p0, v0: l.v0, d: l.d, mega: mega)
+        launch(side: s, p0: l.p0, v0: l.v0, d: l.d, ammo: special, mega: mega)
     }
 
-    private func launch(side: Int, p0: Vec3, v0: Vec3, d: Vec3, mega: Bool) {
-        let res = battle.simulate(p0: p0, v0: v0, wind: wind, mega: mega)
-        flight = Flight(side: side, res: res, path: battle.trace(p0: p0, v0: v0, wind: wind, steps: res.steps))
+    private func launch(side: Int, p0: Vec3, v0: Vec3, d: Vec3, ammo shot: Ammo, mega: Bool) {
+        let f = battle.fly(p0: p0, v0: v0, wind: wind, ammo: shot, mega: mega)
+        flight = Flight(side: side, res: f.res, path: f.path)
         phase = .flight
         ts = 1
         cam = .follow
         let h = SIMD3<Float>(Float(v0.x), 0, Float(v0.z))
         ballDir = simd_length_squared(h) > 1e-8 ? simd_normalize(h) : SIMD3(side == 0 ? 1 : -1, 0, 0)
         world.hidePreview()
-        world.fireBall(from: p0, dir: d, side: side, style: ballStyle(for: side), mega: res.mega)
+        world.fireBall(from: p0, dir: d, side: side, style: ballStyle(for: side), ammo: f.res.ammo, mega: f.res.mega)
         sfx.play(.fire)
-        UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-        pull = nil; timeLeft = nil; megaArmed = false
+        thump(.heavy)
+        pull = nil; timeLeft = nil; megaArmed = false; ammo = .standard
         refreshHUD()
     }
 
@@ -342,16 +509,20 @@ final class GameController: NSObject, ObservableObject {
         let res = f.res
         world.endBall()
         let chargeBefore = battle.charge
-        let dmg = battle.apply(res)
-        world.showImpact(res, damage: dmg)
+        let out = battle.apply(res)
+        world.showImpact(res, outcome: out)
         world.showTarget(nil)
-        let any = dmg.contains { $0.cells > 0 }
+        for i in 0..<2 { world.setShield(i, on: battle.shield[i]) }
+        if out.pickup != nil && !f.popped { world.popPickup() }
+        let any = out.damage.contains { $0.cells > 0 }
         let enemy = 1 - f.side
-        let dealt = dmg[enemy].cells > 0 ? max(1, Int((Double(dmg[enemy].cells) / Double(battle.castles[enemy].total) * 100).rounded())) : 0
+        let dealt = out.damage[enemy].cells > 0 ? max(1, Int((Double(out.damage[enemy].cells) / Double(battle.castles[enemy].total) * 100).rounded())) : 0
         stats[f.side].shots += 1
         if dealt > 0 { stats[f.side].hits += 1; stats[f.side].bestHit = max(stats[f.side].bestHit, dealt) }
         if res.crit { stats[f.side].crits += 1 }
         if res.mega { stats[f.side].megas += 1 }
+        if res.ammo != .standard { stats[f.side].specials += 1 }
+        if out.pickup != nil { stats[f.side].pickups += 1 }
         stats[f.side].topStreak = max(stats[f.side].topStreak, battle.streak[f.side])
         let earned = mode == .challenge ? Challenge.points(dealt: dealt, crit: res.crit, streak: battle.streak[f.side]) : 0
         score += earned
@@ -363,13 +534,15 @@ final class GameController: NSObject, ObservableObject {
         case .ground, .castle:
             sfx.play(any ? .hit : .thud)
             shake = any ? (res.mega ? 1.4 : 0.9) : 0.3
-            if any { UIImpactFeedbackGenerator(style: .rigid).impactOccurred() }
+            if any { thump(.rigid) }
             if dealt > 0 {
                 msg = res.mega ? Tx.megaHit(dealt) : res.crit ? Tx.crit(dealt) : Tx.hit(dealt)
                 if mode == .challenge { msg += "  ·  " + Tx.points(earned) }
                 else if battle.streak[f.side] >= 2 { msg += "  ·  " + Tx.streak(battle.streak[f.side]) }
-            } else if dmg[f.side].cells > 0 { msg = Tx.ownCastle }
+            } else if out.damage[f.side].cells > 0 { msg = Tx.ownCastle }
+            if out.shieldBroken != nil { msg = Tx.shieldBroken + "  ·  " + msg }
         }
+        if dealt == 0, out.damage[f.side].cells == 0, let k = out.pickup { msg = Tx.grabbed(k) }
         if res.crit { sfx.play(.crit) }
         for s in 0..<2 where chargeBefore[s] < 1 && battle.charge[s] >= 1 && driverOf(s) == .human && (mode != .challenge || s == 0) { sfx.play(.charged) }
         show(toast: msg)
@@ -379,7 +552,7 @@ final class GameController: NSObject, ObservableObject {
         impactA = 0
         cam = res.kind == .out ? .aim : .impact
         phase = .impact
-        impactT = any ? (res.mega ? 4.4 : 3.8) : 1.9
+        impactT = any ? (res.mega || res.ammo == .cluster ? 4.4 : 3.8) : 1.9
         slowT = any ? 0.8 : 0
         flight = nil
         refreshHUD()
@@ -390,7 +563,7 @@ final class GameController: NSObject, ObservableObject {
         guard phase == .aim else { return }
         if send && mode == .online { net?.send(NetMessage(t: "skip", round: round, k: battle.shot), reliable: true) }
         battle.forfeitTurn()
-        pull = nil; timeLeft = nil; megaArmed = false; skipped = true
+        pull = nil; timeLeft = nil; megaArmed = false; ammo = .standard; skipped = true
         world.hidePreview()
         world.showTarget(nil)
         show(toast: Tx.timeUp)
@@ -405,12 +578,12 @@ final class GameController: NSObject, ObservableObject {
             shotsTaken += 1
             let cleared = battle.castles[1].pct < K.lose
             if cleared || shotsTaken >= Challenge.shots { finishSiege(cleared: cleared); return }
-            battle.shot += 2          // the target castle never shoots back, so the turn stays with the player
+            battle.advance(by: 2)     // the target castle never shoots back, so the turn stays with the player
             beginTurn()
             return
         }
         if let loser = battle.loser() { gameOver(winner: 1 - loser); return }
-        battle.shot += 1
+        battle.advance()
         beginTurn()
     }
 
@@ -420,9 +593,10 @@ final class GameController: NSObject, ObservableObject {
         camSide = winner
         orbitA = winner == 0 ? Double.pi - 0.55 : 0.55
         orbitH = 30; orbitR = 60
-        pull = nil; timeLeft = nil; megaArmed = false; flight = nil
+        pull = nil; timeLeft = nil; megaArmed = false; ammo = .standard; flight = nil; confirmQuit = false
         world.hidePreview()
         world.showTarget(nil)
+        world.showPickup(nil)
         world.endBall()
     }
 
@@ -464,10 +638,17 @@ final class GameController: NSObject, ObservableObject {
             info.title = won ? Tx.won : Tx.lost
             sfx.play(won ? .win : .lose)
             var updated = profile
-            info.reward = updated.record(won: won, mode: mode == .online ? .online(opponent: rival?.trophies) : .computer(difficulty), stats: stats[mine])
+            let rewardMode: RewardMode = mode == .online ? .online(opponent: rival?.trophies) : .computer(aiLevel)
+            info.reward = updated.record(won: won, mode: rewardMode, stats: stats[mine], stage: stage,
+                                         stageStars: won ? Stage.stars(ownPct: battle.castles[mine].pct) : 0)
             info.stats = stats[mine]
             info.rivalStats = stats[1 - mine]
             info.side = mine
+            if let s = stage, won {
+                info.title = Tx.stageWon(s.id)
+                info.hasNextStage = s.id < Stage.all.count
+                if s.id == Stage.all.count { info.detail = Tx.campaignDone }
+            }
             updated.save()
             profile = updated
         } else {
@@ -494,6 +675,9 @@ final class GameController: NSObject, ObservableObject {
         h.pct = battle.castles.map { $0.pct }
         h.charge = battle.charge
         h.streak = battle.streak
+        h.shield = battle.shield
+        h.pickup = battle.pickup?.kind
+        h.modifier = battle.rules.modifier
         let s = battle.turn
         h.turnSide = s
         h.finished = phase == .over
@@ -520,6 +704,7 @@ final class GameController: NSObject, ObservableObject {
         h.megaVisible = humanAiming
         h.megaCharge = battle.charge[s]
         h.megaReady = humanAiming && battle.charge[s] >= 1
+        h.stock = humanAiming ? battle.stock[s] : [0, 0, 0, 0]
         h.hasTarget = phase == .aim && battle.goldTarget() != nil
         if mode == .challenge {
             h.score = score
@@ -569,13 +754,16 @@ final class GameController: NSObject, ObservableObject {
 
     func pinchEnded() { orbitR0 = orbitR }
 
+    /// Dotted start of the flight. Beginners playing an easy computer see more of it.
     private func showPreview(side s: Int) {
         let l = Ballistics.launch(side: s, aim: aims[s])
+        let dots = (mode == .ai || mode == .campaign) && aiLevel == .kolay ? 36 : 20
         var x = l.p0.x, y = l.p0.y, z = l.p0.z, vx = l.v0.x, vy = l.v0.y, vz = l.v0.z
         var pts: [SIMD3<Float>] = []
-        for i in 1...(20 * 9) {
-            vx += wind.x * K.dt; vy -= K.grav * K.dt; vz += wind.z * K.dt
+        for i in 1...(dots * 9) {
+            vx += wind.x * K.dt; vy -= battle.rules.gravity * K.dt; vz += wind.z * K.dt
             x += vx * K.dt; y += vy * K.dt; z += vz * K.dt
+            if y < 0.5 { break }
             if i % 9 == 0 { pts.append(SIMD3(Float(x), Float(y), Float(z))) }
         }
         world.showPreview(pts)
@@ -598,7 +786,7 @@ final class GameController: NSObject, ObservableObject {
         myNonce = UInt32.random(in: 1...UInt32.max)
         lobby.busy = true
         lobby.status = Tx.opponentFound
-        net?.send(NetMessage(t: "hello", nonce: myNonce, name: profile.name, trophies: profile.trophies, level: profile.level), reliable: true)
+        net?.send(NetMessage(t: "hello", nonce: myNonce, name: profile.name, trophies: profile.trophies, level: profile.level, design: profile.castle.encoded), reliable: true)
     }
 
     private func netLost() {
@@ -619,7 +807,7 @@ final class GameController: NSObject, ObservableObject {
         round += 1
         let seed = UInt32.random(in: 0...UInt32.max), first = (round + 1) % 2
         net?.send(NetMessage(t: "start", seed: seed, round: round, first: first), reliable: true)
-        startGame(.online, seed: seed, me: 0, first: first, round: round)
+        startGame(.online, seed: seed, me: 0, first: first, round: round, designs: [profile.castle, rival?.design ?? .classic])
         announceRival()
     }
 
@@ -634,12 +822,14 @@ final class GameController: NSObject, ObservableObject {
             guard let n = m.nonce else { return }
             if n == myNonce { netConnected(); return }
             // What the opponent tells us about themselves is shown, never trusted for anything else.
-            rival = (Profile.cleanName(m.name ?? ""), min(100_000, max(0, m.trophies ?? 0)), min(999, max(1, m.level ?? 1)))
+            // Their castle is checked against the building rules; anything else becomes the classic layout.
+            rival = (Profile.cleanName(m.name ?? ""), min(100_000, max(0, m.trophies ?? 0)), min(999, max(1, m.level ?? 1)),
+                     CastleDesign(encoded: m.design ?? []) ?? .classic)
             isHost = myNonce > n
             if isHost && round == 0 { hostNewRound() }
         case "start":
             guard !isHost, let seed = m.seed, let r = m.round, let first = m.first, first == 0 || first == 1 else { return }
-            startGame(.online, seed: seed, me: 1, first: first, round: r)
+            startGame(.online, seed: seed, me: 1, first: first, round: r, designs: [rival?.design ?? .classic, profile.castle])
             announceRival()
         case "aim":
             guard phase == .aim, driver == .remote, let y = m.yaw, let p = m.power, y.isFinite, p.isFinite else { return }
@@ -667,7 +857,7 @@ final class GameController: NSObject, ObservableObject {
         pendingShot = nil
         let s = battle.turn
         if let y = m.yaw, let p = m.power, y.isFinite, p.isFinite { aims[s] = Aim(yaw: min(K.maxYaw, max(-K.maxYaw, y)), power: min(100, max(0, p))) }
-        launch(side: s, p0: p0, v0: v0, d: Vec3(x: v0.x / sp, y: v0.y / sp, z: v0.z / sp), mega: m.mega == true)
+        launch(side: s, p0: p0, v0: v0, d: Vec3(x: v0.x / sp, y: v0.y / sp, z: v0.z / sp), ammo: Ammo(rawValue: m.ammo ?? 0) ?? .standard, mega: m.mega == true)
     }
 
     // MARK: Frame update
@@ -701,7 +891,7 @@ final class GameController: NSObject, ObservableObject {
                         net?.send(NetMessage(t: "aim", yaw: aims[s].yaw, power: aims[s].power), reliable: false)
                     }
                 }
-                if timeLeft != nil { runShotClock(dt) }
+                if timeLeft != nil && !confirmQuit { runShotClock(dt) }
             }
         }
         if phase == .flight, var f = flight {
@@ -713,6 +903,12 @@ final class GameController: NSObject, ObservableObject {
             world.ball.simdPosition = a + (b - a) * fr
             let d = SIMD3<Float>(b.x - a.x, 0, b.z - a.z)
             if simd_length_squared(d) > 1e-10 { ballDir = simd_normalize(simd_mix(ballDir, simd_normalize(d), SIMD3(repeating: Float(1 - exp(-6 * dt))))) }
+            if let c = f.res.collectedAt, !f.popped, f.i >= Double(c) {
+                f.popped = true
+                world.popPickup()
+                sfx.play(.charged)
+                if let k = battle.pickup?.kind { show(toast: Tx.grabbed(k)) }
+            }
             flight = f
             if f.i >= Double(n) { impact() }
         } else if phase == .impact {
@@ -760,6 +956,12 @@ final class GameController: NSObject, ObservableObject {
             let ex = (camSide == 0 ? 1 : -1) * Float(K.front + Double(K.gw) / 2)
             tPos = SIMD3(ex + Float(cos(orbitA) * orbitR), Float(orbitH), Float(sin(orbitA) * orbitR))
             tLook = SIMD3(ex, 7, 0)
+            if screen == .builder {
+                // The grid covers the left of the screen, so frame the castle in the right half.
+                let f = simd_normalize(SIMD3<Float>(tLook.x - tPos.x, 0, tLook.z - tPos.z))
+                let left = SIMD3<Float>(f.z, 0, -f.x) * Float(orbitR) * 0.3
+                tPos += left; tLook += left
+            }
             k = 4
         case .follow:
             let b = world.ball.simdPosition, d = ballDir
