@@ -1,0 +1,325 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		05069431283F39C2BBF794F8 /* Rules.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86AEB13D6197BE1DDFBDD1ED /* Rules.swift */; };
+		33BEED068E0A700B12F284BA /* Net.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DCB1F1E5FF3A8CB55F594C5 /* Net.swift */; };
+		51BE5FE3798D9EFA42295B05 /* World.swift in Sources */ = {isa = PBXBuildFile; fileRef = 914D6F007EA7A24B1C52E564 /* World.swift */; };
+		58C6A4F8294C72D4837E4E97 /* Views.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5469E465B403D15E28ADE431 /* Views.swift */; };
+		9C304F6BD7623CF8AC36009C /* GameController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7A1AE2CF41C6AE22B158A24 /* GameController.swift */; };
+		C8B7FA012529A7259C16C192 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F9AFA7634DE71857938BFD35 /* Assets.xcassets */; };
+		E176E306895D1C359BE2B975 /* Sfx.swift in Sources */ = {isa = PBXBuildFile; fileRef = 930588B241A4AEA001E25EF6 /* Sfx.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		5469E465B403D15E28ADE431 /* Views.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views.swift; sourceTree = "<group>"; };
+		86AEB13D6197BE1DDFBDD1ED /* Rules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Rules.swift; sourceTree = "<group>"; };
+		8DCB1F1E5FF3A8CB55F594C5 /* Net.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Net.swift; sourceTree = "<group>"; };
+		914D6F007EA7A24B1C52E564 /* World.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = World.swift; sourceTree = "<group>"; };
+		930588B241A4AEA001E25EF6 /* Sfx.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sfx.swift; sourceTree = "<group>"; };
+		A7A1AE2CF41C6AE22B158A24 /* GameController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameController.swift; sourceTree = "<group>"; };
+		F377EB750792BBF16CEC1543 /* KaleSavasi.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = KaleSavasi.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F9AFA7634DE71857938BFD35 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		18590AC0F95EE6592F01E606 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				F9AFA7634DE71857938BFD35 /* Assets.xcassets */,
+				A7A1AE2CF41C6AE22B158A24 /* GameController.swift */,
+				8DCB1F1E5FF3A8CB55F594C5 /* Net.swift */,
+				86AEB13D6197BE1DDFBDD1ED /* Rules.swift */,
+				930588B241A4AEA001E25EF6 /* Sfx.swift */,
+				5469E465B403D15E28ADE431 /* Views.swift */,
+				914D6F007EA7A24B1C52E564 /* World.swift */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		A4B1F6F60C92AEBDE932A537 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				F377EB750792BBF16CEC1543 /* KaleSavasi.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		E6EA41C886EBB07827A4F706 = {
+			isa = PBXGroup;
+			children = (
+				18590AC0F95EE6592F01E606 /* Sources */,
+				A4B1F6F60C92AEBDE932A537 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		CE827235047306C4439BA1D9 /* KaleSavasi */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 026104295EC75737575028A8 /* Build configuration list for PBXNativeTarget "KaleSavasi" */;
+			buildPhases = (
+				15A02E494B9297D1BFE86577 /* Sources */,
+				72E33231652A3AC1F8F608DD /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = KaleSavasi;
+			packageProductDependencies = (
+			);
+			productName = KaleSavasi;
+			productReference = F377EB750792BBF16CEC1543 /* KaleSavasi.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		9348621FA8153BD9F4E5FF8D /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+				};
+			};
+			buildConfigurationList = 7F7CB19A1280E49D34D9E3CF /* Build configuration list for PBXProject "KaleSavasi" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = E6EA41C886EBB07827A4F706;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = A4B1F6F60C92AEBDE932A537 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				CE827235047306C4439BA1D9 /* KaleSavasi */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		72E33231652A3AC1F8F608DD /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C8B7FA012529A7259C16C192 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		15A02E494B9297D1BFE86577 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9C304F6BD7623CF8AC36009C /* GameController.swift in Sources */,
+				33BEED068E0A700B12F284BA /* Net.swift in Sources */,
+				05069431283F39C2BBF794F8 /* Rules.swift in Sources */,
+				E176E306895D1C359BE2B975 /* Sfx.swift in Sources */,
+				58C6A4F8294C72D4837E4E97 /* Views.swift in Sources */,
+				51BE5FE3798D9EFA42295B05 /* World.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		370A997CBB077508F5CED8A2 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = KaleSavasi.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.alpsenel.kalesavasi;
+				PRODUCT_NAME = KaleSavasi;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		458AF79EB0EC197AC0844337 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		7BE9F551E9AEA6CF25C8794A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = KaleSavasi.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.alpsenel.kalesavasi;
+				PRODUCT_NAME = KaleSavasi;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		A502E24FD0899D137323F790 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		026104295EC75737575028A8 /* Build configuration list for PBXNativeTarget "KaleSavasi" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				370A997CBB077508F5CED8A2 /* Debug */,
+				7BE9F551E9AEA6CF25C8794A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		7F7CB19A1280E49D34D9E3CF /* Build configuration list for PBXProject "KaleSavasi" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				458AF79EB0EC197AC0844337 /* Debug */,
+				A502E24FD0899D137323F790 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 9348621FA8153BD9F4E5FF8D /* Project object */;
+}
