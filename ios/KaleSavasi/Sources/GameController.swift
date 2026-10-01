@@ -3,12 +3,14 @@ import SceneKit
 import QuartzCore
 
 enum Screen { case menu, lobby, playing, over }
-enum Mode { case ai, local, online }
+enum Mode { case ai, local, online, challenge }
 enum OnlineKind { case gameCenter, nearby }
 
 struct HUD: Equatable {
     var names = ["", ""]
     var pct = [1.0, 1.0]
+    var charge = [0.0, 0.0]
+    var streak = [0, 0]
     var turnText = ""
     var turnSide = 0
     var finished = false
@@ -17,6 +19,13 @@ struct HUD: Equatable {
     var canAim = false
     var canInspect = false
     var inspecting = false
+    var megaVisible = false
+    var megaReady = false
+    var megaCharge = 0.0
+    var hasTarget = false
+    /// Daily siege only: running score and how many shots have been taken.
+    var score: Int?
+    var shotsTaken = 0
 }
 
 /// A pull-back gesture in progress, in screen points.
@@ -32,6 +41,21 @@ struct OverInfo: Equatable {
     var title: String
     var detail: String
     var waiting = false
+    var stats: MatchStats?
+    var reward: Reward?
+    /// Head-to-head: the other side's numbers, both names, and which side is "mine".
+    var rivalStats: MatchStats?
+    var names: [String] = []
+    var side = 0
+    var isSiege = false
+}
+
+struct MissionRow: Identifiable {
+    let id: String
+    let title: String
+    let progress: Int
+    let target: Int
+    let done: Bool
 }
 
 struct Lobby: Equatable {
@@ -54,6 +78,12 @@ final class GameController: NSObject, ObservableObject {
     @Published var lobby = Lobby()
     @Published var difficulty = Difficulty.orta
     @Published var soundOn = true { didSet { sfx.enabled = soundOn } }
+    @Published var megaArmed = false
+    /// Seconds left on the shot clock, or nil when the turn is not timed.
+    @Published var timeLeft: Int?
+    @Published var profile = Profile.load()
+    @Published var showProfile = false
+    @Published var language = Tx.lang { didSet { Tx.set(language); refreshHUD() } }
     var viewSize = CGSize(width: 844, height: 390)
 
     private enum Phase { case menu, aim, flight, impact, over }
@@ -66,13 +96,18 @@ final class GameController: NSObject, ObservableObject {
     private var battle = Battle(seed: UInt32.random(in: 0...UInt32.max), first: 0)
     private var aims = [Aim(), Aim()]
     private var lastPull: [CGSize?] = [nil, nil]
+    private var stats = [MatchStats(), MatchStats()]
     private var phase = Phase.menu
     private var driver = Driver.human
     private var wind = (x: 0.0, z: 0.0)
     private var flight: Flight?
     private var plan: (t: Double, from: Aim, to: Aim)?
     private var remoteAim: Aim?
-    private var impactT = 0.0, slowT = 0.0, ts = 1.0
+    private var impactT = 0.0, slowT = 0.0, ts = 1.0, turnT = 0.0
+    private var skipped = false
+    private var score = 0, shotsTaken = 0, clearBonus = 0
+    /// Who the online opponent says they are. Display only.
+    private var rival: (name: String, trophies: Int, level: Int)?
     private var toastWork: DispatchWorkItem?
 
     private var cam = Cam.menu
@@ -116,10 +151,25 @@ final class GameController: NSObject, ObservableObject {
         #endif
     }
 
+    /// The side whose results count for this device's profile; nil in pass-and-play.
+    private var mySide: Int? { mode == .local ? nil : mode == .online ? me : 0 }
+
+    var missions: [MissionRow] {
+        profile.missionRows().map { MissionRow(id: $0.mission.id, title: Tx.mission($0.mission), progress: $0.progress, target: $0.mission.target, done: $0.done) }
+    }
+
     // MARK: Menu actions
 
     func playComputer() { sfx.play(.tick); startGame(.ai) }
     func playLocal() { sfx.play(.tick); startGame(.local) }
+    func playSiege() { sfx.play(.tick); startGame(.challenge, seed: Challenge.seed(day: Profile.dayString())) }
+
+    func setName(_ raw: String) {
+        let clean = Profile.cleanName(raw)
+        guard clean != profile.name else { return }
+        profile.name = clean
+        if !clean.isEmpty { profile.save() }
+    }
 
     func playOnline(_ kind: OnlineKind) {
         sfx.play(.tick)
@@ -136,22 +186,32 @@ final class GameController: NSObject, ObservableObject {
     }
 
     func showMenu() {
+        // Walking out of an online match that is under way counts as a loss.
+        if mode == .online, screen == .playing, phase != .over, phase != .menu, battle.shot >= 2, !oppGone {
+            var p = profile
+            _ = p.record(won: false, mode: .online(opponent: rival?.trophies), stats: stats[me], forfeit: true)
+            p.save()
+            profile = p
+        }
         stopNet()
         phase = .menu
         cam = .menu
         menuA = Double(atan2(camPos.x, camPos.z))
-        pull = nil; ghost = nil; over = nil
+        pull = nil; ghost = nil; over = nil; timeLeft = nil; megaArmed = false
         world.hidePreview()
+        world.showTarget(nil)
         world.endBall()
         screen = .menu
     }
 
     func rematch() {
         if mode == .online {
-            guard net != nil, !oppGone else { over?.detail = "Rakip ayrıldı. Ana menüden yeni bir eşleşme başlat."; return }
+            guard net != nil, !oppGone else { over?.detail = Tx.rematchGone; return }
             wantAgain = true
             net?.send(NetMessage(t: "again", round: round), reliable: true)
             if isHost && oppAgain { hostNewRound() } else { over?.waiting = true }
+        } else if mode == .challenge {
+            playSiege()
         } else {
             startGame(mode, first: mode == .local ? 1 - battle.first : 0)
         }
@@ -168,6 +228,19 @@ final class GameController: NSObject, ObservableObject {
         refreshHUD()
     }
 
+    func toggleMega() {
+        guard phase == .aim, driver == .human, hud.megaReady else { return }
+        megaArmed.toggle()
+        sfx.play(megaArmed ? .charged : .tick)
+    }
+
+    func selectBall(_ id: Int) {
+        guard let style = BallStyle.all.first(where: { $0.id == id }), profile.owns(style) else { return }
+        profile.ballStyle = id
+        profile.save()
+        sfx.play(.tick)
+    }
+
     // MARK: Turn flow
 
     private func startGame(_ m: Mode, seed: UInt32? = nil, me: Int = 0, first: Int = 0, round: Int = 1) {
@@ -180,25 +253,35 @@ final class GameController: NSObject, ObservableObject {
         world.load(battle)
         aims = [Aim(), Aim()]
         lastPull = [nil, nil]
-        pull = nil; over = nil; toast = nil
+        stats = [MatchStats(), MatchStats()]
+        score = 0; shotsTaken = 0; clearBonus = 0
+        pull = nil; over = nil; toast = nil; showProfile = false
         screen = .playing
         beginTurn()
     }
 
     private func names() -> [String] {
         switch mode {
-        case .ai: return ["Sen", "Yapay zekâ"]
-        case .online: return me == 0 ? ["Sen", "Rakip"] : ["Rakip", "Sen"]
-        case .local: return ["Kırmızı", "Mavi"]
+        case .ai: return [Tx.you, Tx.computer]
+        case .online:
+            let them = (rival?.name).flatMap { $0.isEmpty ? nil : $0 } ?? Tx.opponent
+            return me == 0 ? [Tx.you, them] : [them, Tx.you]
+        case .local: return [Tx.red, Tx.blue]
+        case .challenge: return [Tx.you, Tx.targetCastle]
         }
     }
 
     private func driverOf(_ side: Int) -> Driver {
         switch mode {
         case .ai: return side == 0 ? .human : .computer
-        case .local: return .human
+        case .local, .challenge: return .human
         case .online: return side == me ? .human : .remote
         }
+    }
+
+    private func ballStyle(for side: Int) -> BallStyle {
+        let own = mode == .local || side == mySide
+        return BallStyle.all.first { $0.id == (own ? profile.ballStyle : 0) } ?? BallStyle.all[0]
     }
 
     private func beginTurn() {
@@ -207,28 +290,39 @@ final class GameController: NSObject, ObservableObject {
         driver = driverOf(s)
         wind = battle.wind()
         plan = nil; remoteAim = nil; pull = nil
+        megaArmed = false; skipped = false
         cam = .aim; camSide = s
         ghost = driver == .human ? lastPull[s] : nil
+        world.showTarget(battle.goldTarget())
+        turnT = K.turnSeconds
+        // Shot clock: only where a person on the other side is waiting.
+        timeLeft = driver == .human && (mode == .online || mode == .local) && !autoPlay ? Int(K.turnSeconds) : nil
         refreshHUD()
         switch driver {
-        case .computer: plan = (0, aims[s], Computer.choose(battle: battle, side: s, difficulty: difficulty, wind: wind))
+        case .computer: planComputerShot(side: s, difficulty: difficulty)
         case .remote: checkRemote()
-        case .human:
-            if autoPlay { plan = (0, aims[s], Computer.choose(battle: battle, side: s, difficulty: .orta, wind: wind)) }
+        case .human: if autoPlay { planComputerShot(side: s, difficulty: .orta) }
         }
+    }
+
+    private func planComputerShot(side s: Int, difficulty: Difficulty) {
+        let c = Computer.choose(battle: battle, side: s, difficulty: difficulty, wind: wind)
+        megaArmed = c.mega
+        plan = (0, aims[s], c.aim)
     }
 
     private func fire() {
         guard phase == .aim, !oppGone else { return }
         let s = battle.turn, l = Ballistics.launch(side: s, aim: aims[s])
+        let mega = megaArmed && battle.charge[s] >= 1
         if mode == .online && driver == .human {
-            net?.send(NetMessage(t: "shot", round: round, k: battle.shot, p: bits(l.p0), v: bits(l.v0), yaw: aims[s].yaw, power: aims[s].power), reliable: true)
+            net?.send(NetMessage(t: "shot", round: round, k: battle.shot, p: bits(l.p0), v: bits(l.v0), yaw: aims[s].yaw, power: aims[s].power, mega: mega), reliable: true)
         }
-        launch(side: s, p0: l.p0, v0: l.v0, d: l.d)
+        launch(side: s, p0: l.p0, v0: l.v0, d: l.d, mega: mega)
     }
 
-    private func launch(side: Int, p0: Vec3, v0: Vec3, d: Vec3) {
-        let res = battle.simulate(p0: p0, v0: v0, wind: wind)
+    private func launch(side: Int, p0: Vec3, v0: Vec3, d: Vec3, mega: Bool) {
+        let res = battle.simulate(p0: p0, v0: v0, wind: wind, mega: mega)
         flight = Flight(side: side, res: res, path: battle.trace(p0: p0, v0: v0, wind: wind, steps: res.steps))
         phase = .flight
         ts = 1
@@ -236,10 +330,10 @@ final class GameController: NSObject, ObservableObject {
         let h = SIMD3<Float>(Float(v0.x), 0, Float(v0.z))
         ballDir = simd_length_squared(h) > 1e-8 ? simd_normalize(h) : SIMD3(side == 0 ? 1 : -1, 0, 0)
         world.hidePreview()
-        world.fireBall(from: p0, dir: d, side: side)
+        world.fireBall(from: p0, dir: d, side: side, style: ballStyle(for: side), mega: res.mega)
         sfx.play(.fire)
         UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-        pull = nil
+        pull = nil; timeLeft = nil; megaArmed = false
         refreshHUD()
     }
 
@@ -247,22 +341,37 @@ final class GameController: NSObject, ObservableObject {
         guard let f = flight else { return }
         let res = f.res
         world.endBall()
+        let chargeBefore = battle.charge
         let dmg = battle.apply(res)
         world.showImpact(res, damage: dmg)
+        world.showTarget(nil)
         let any = dmg.contains { $0.cells > 0 }
         let enemy = 1 - f.side
-        var msg = "Iska!"
+        let dealt = dmg[enemy].cells > 0 ? max(1, Int((Double(dmg[enemy].cells) / Double(battle.castles[enemy].total) * 100).rounded())) : 0
+        stats[f.side].shots += 1
+        if dealt > 0 { stats[f.side].hits += 1; stats[f.side].bestHit = max(stats[f.side].bestHit, dealt) }
+        if res.crit { stats[f.side].crits += 1 }
+        if res.mega { stats[f.side].megas += 1 }
+        stats[f.side].topStreak = max(stats[f.side].topStreak, battle.streak[f.side])
+        let earned = mode == .challenge ? Challenge.points(dealt: dealt, crit: res.crit, streak: battle.streak[f.side]) : 0
+        score += earned
+
+        var msg = Tx.miss
         switch res.kind {
         case .out: break
-        case .water: msg = "Gülle suya düştü"
+        case .water: msg = Tx.water
         case .ground, .castle:
             sfx.play(any ? .hit : .thud)
-            shake = any ? 0.9 : 0.3
+            shake = any ? (res.mega ? 1.4 : 0.9) : 0.3
             if any { UIImpactFeedbackGenerator(style: .rigid).impactOccurred() }
-            if dmg[enemy].cells > 0 {
-                msg = "İsabet! −%\(max(1, Int((Double(dmg[enemy].cells) / Double(battle.castles[enemy].total) * 100).rounded())))"
-            } else if dmg[f.side].cells > 0 { msg = "Kendi kaleni vurdun!" }
+            if dealt > 0 {
+                msg = res.mega ? Tx.megaHit(dealt) : res.crit ? Tx.crit(dealt) : Tx.hit(dealt)
+                if mode == .challenge { msg += "  ·  " + Tx.points(earned) }
+                else if battle.streak[f.side] >= 2 { msg += "  ·  " + Tx.streak(battle.streak[f.side]) }
+            } else if dmg[f.side].cells > 0 { msg = Tx.ownCastle }
         }
+        if res.crit { sfx.play(.crit) }
+        for s in 0..<2 where chargeBefore[s] < 1 && battle.charge[s] >= 1 && driverOf(s) == .human && (mode != .challenge || s == 0) { sfx.play(.charged) }
         show(toast: msg)
         impactP = res.pos.f
         let h = SIMD3<Float>(Float(res.vel.x), 0, Float(res.vel.z))
@@ -270,40 +379,105 @@ final class GameController: NSObject, ObservableObject {
         impactA = 0
         cam = res.kind == .out ? .aim : .impact
         phase = .impact
-        impactT = any ? 3.8 : 1.9
+        impactT = any ? (res.mega ? 4.4 : 3.8) : 1.9
         slowT = any ? 0.8 : 0
         flight = nil
         refreshHUD()
     }
 
+    /// The shot clock ran out: the turn passes without a shot.
+    private func skipTurn(send: Bool) {
+        guard phase == .aim else { return }
+        if send && mode == .online { net?.send(NetMessage(t: "skip", round: round, k: battle.shot), reliable: true) }
+        battle.forfeitTurn()
+        pull = nil; timeLeft = nil; megaArmed = false; skipped = true
+        world.hidePreview()
+        world.showTarget(nil)
+        show(toast: Tx.timeUp)
+        sfx.play(.thud)
+        phase = .impact
+        impactT = 1.4; slowT = 0
+        refreshHUD()
+    }
+
     private func endTurn() {
+        if mode == .challenge {
+            shotsTaken += 1
+            let cleared = battle.castles[1].pct < K.lose
+            if cleared || shotsTaken >= Challenge.shots { finishSiege(cleared: cleared); return }
+            battle.shot += 2          // the target castle never shoots back, so the turn stays with the player
+            beginTurn()
+            return
+        }
         if let loser = battle.loser() { gameOver(winner: 1 - loser); return }
         battle.shot += 1
         beginTurn()
     }
 
-    private func gameOver(winner: Int) {
+    private func enterOverState(lookingAt winner: Int) {
         phase = .over
         cam = .target
         camSide = winner
         orbitA = winner == 0 ? Double.pi - 0.55 : 0.55
         orbitH = 30; orbitR = 60
-        let nm = names()
-        let title: String
-        if mode == .local { title = "\(nm[winner]) kazandı!"; sfx.play(.win) } else {
-            let won = (mode == .ai ? 0 : me) == winner
-            title = won ? "Kazandın!" : "Kaybettin"
-            sfx.play(won ? .win : .lose)
-        }
-        let p = battle.castles.map { Int(($0.pct * 100 + 1e-9).rounded(.down)) }
-        let info = OverInfo(title: title, detail: "Ayakta kalan yapı: \(nm[0]) %\(p[0]), \(nm[1]) %\(p[1]).")
+        pull = nil; timeLeft = nil; megaArmed = false; flight = nil
+        world.hidePreview()
+        world.showTarget(nil)
+        world.endBall()
+    }
+
+    private func present(_ info: OverInfo) {
         refreshHUD()
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
             guard let self, self.phase == .over else { return }
             self.over = info
-            if self.oppAgain { self.over?.detail = "Rakip tekrar oynamak istiyor." }
+            if self.oppAgain { self.over?.detail = Tx.rematchWanted }
             self.screen = .over
         }
+    }
+
+    private func finishSiege(cleared: Bool) {
+        if cleared {
+            clearBonus = Challenge.clearBonus(unusedShots: Challenge.shots - shotsTaken)
+            score += clearBonus
+        }
+        enterOverState(lookingAt: 0)
+        var updated = profile
+        let reward = updated.recordSiege(score: score, stats: stats[0])
+        updated.save()
+        profile = updated
+        sfx.play(.win)
+        var info = OverInfo(title: cleared ? Tx.siegeCleared : Tx.siegeOver, detail: Tx.siegeScore(score) + (cleared ? "  ·  " + Tx.clearBonus(clearBonus) : ""))
+        info.stats = stats[0]
+        info.reward = reward
+        info.isSiege = true
+        present(info)
+    }
+
+    private func gameOver(winner: Int, forfeit: Bool = false) {
+        enterOverState(lookingAt: winner)
+        let nm = names()
+        let p = battle.castles.map { Int(($0.pct * 100 + 1e-9).rounded(.down)) }
+        var info = OverInfo(title: "", detail: forfeit ? Tx.forfeitWin : Tx.standing(nm[0], p[0], nm[1], p[1]))
+        if let mine = mySide {
+            let won = winner == mine
+            info.title = won ? Tx.won : Tx.lost
+            sfx.play(won ? .win : .lose)
+            var updated = profile
+            info.reward = updated.record(won: won, mode: mode == .online ? .online(opponent: rival?.trophies) : .computer(difficulty), stats: stats[mine])
+            info.stats = stats[mine]
+            info.rivalStats = stats[1 - mine]
+            info.side = mine
+            updated.save()
+            profile = updated
+        } else {
+            info.title = Tx.sideWon(nm[winner])
+            info.stats = stats[0]
+            info.rivalStats = stats[1]
+            sfx.play(.win)
+        }
+        info.names = nm
+        present(info)
     }
 
     private func show(toast msg: String) {
@@ -318,27 +492,40 @@ final class GameController: NSObject, ObservableObject {
         var h = HUD()
         h.names = names()
         h.pct = battle.castles.map { $0.pct }
+        h.charge = battle.charge
+        h.streak = battle.streak
         let s = battle.turn
         h.turnSide = s
         h.finished = phase == .over
-        if oppGone { h.turnText = "Rakip ayrıldı" } else {
+        if oppGone { h.turnText = Tx.opponentLeft } else {
             switch phase {
-            case .flight, .impact: h.turnText = "Gülle havada"
-            case .over: h.turnText = "Oyun bitti"
+            case .flight: h.turnText = Tx.inFlight
+            case .impact: h.turnText = skipped ? Tx.timeUp : Tx.inFlight
+            case .over: h.turnText = Tx.gameOver
             default:
                 switch driver {
-                case .human: h.turnText = mode == .local ? "Sıra: \(h.names[s])" : "Sıra sende"
-                case .computer: h.turnText = "Yapay zekâ nişan alıyor"
-                case .remote: h.turnText = "Rakip nişan alıyor"
+                case .human: h.turnText = mode == .local ? Tx.turnOf(h.names[s]) : mode == .challenge ? Tx.dailySiege : Tx.yourTurn
+                case .computer: h.turnText = Tx.computerAiming
+                case .remote: h.turnText = Tx.opponentAiming
                 }
             }
         }
         let sg: Double = s == 0 ? 1 : -1, f = wind.x * sg, r = wind.z * sg
         h.windAngle = atan2(r, f) * 180 / .pi
         h.windPower = Int(((f * f + r * r).squareRoot() / (K.wind * 1.414) * 10).rounded())
+        let humanAiming = phase == .aim && driver == .human && !oppGone && !autoPlay
         h.canInspect = phase == .aim
         h.inspecting = cam == .target && phase == .aim
-        h.canAim = phase == .aim && driver == .human && !oppGone && cam == .aim
+        h.canAim = humanAiming && cam == .aim
+        h.megaVisible = humanAiming
+        h.megaCharge = battle.charge[s]
+        h.megaReady = humanAiming && battle.charge[s] >= 1
+        h.hasTarget = phase == .aim && battle.goldTarget() != nil
+        if mode == .challenge {
+            h.score = score
+            h.shotsTaken = min(Challenge.shots, shotsTaken + (phase == .flight || phase == .impact ? 1 : 0))
+            h.charge[1] = 0; h.streak[1] = 0      // the target castle has no cannon to charge
+        }
         if h != hud { hud = h }
     }
 
@@ -354,7 +541,7 @@ final class GameController: NSObject, ObservableObject {
             lastDrag = location
             return
         }
-        guard phase == .aim, driver == .human, cam == .aim, !oppGone else { return }
+        guard phase == .aim, driver == .human, cam == .aim, !oppGone, plan == nil else { return }
         let maxPull = min(260, Double(viewSize.height) * 0.62)
         let dx = Double(location.x - start.x), dy = Double(location.y - start.y)
         let power = min(1, max(0, dy / maxPull)) * 100
@@ -402,6 +589,7 @@ final class GameController: NSObject, ObservableObject {
         net?.stop()
         net = nil
         round = 0; isHost = false; wantAgain = false; oppAgain = false; pendingShot = nil; oppGone = false
+        rival = nil
     }
 
     private func netConnected() {
@@ -409,13 +597,22 @@ final class GameController: NSObject, ObservableObject {
         round = 0
         myNonce = UInt32.random(in: 1...UInt32.max)
         lobby.busy = true
-        lobby.status = "Rakip bulundu, oyun başlıyor…"
-        net?.send(NetMessage(t: "hello", nonce: myNonce), reliable: true)
+        lobby.status = Tx.opponentFound
+        net?.send(NetMessage(t: "hello", nonce: myNonce, name: profile.name, trophies: profile.trophies, level: profile.level), reliable: true)
     }
 
     private func netLost() {
         oppGone = true
-        if screen == .lobby { lobby.status = "Bağlantı koptu."; lobby.busy = false } else { show(toast: "Rakip ayrıldı"); refreshHUD() }
+        if screen == .lobby {
+            lobby.status = Tx.connectionLost
+            lobby.busy = false
+        } else if screen == .playing, phase != .over, phase != .menu {
+            // The opponent walked out mid-match: the win goes to the player who stayed.
+            show(toast: Tx.opponentLeft)
+            gameOver(winner: me, forfeit: true)
+        } else {
+            refreshHUD()
+        }
     }
 
     private func hostNewRound() {
@@ -423,6 +620,12 @@ final class GameController: NSObject, ObservableObject {
         let seed = UInt32.random(in: 0...UInt32.max), first = (round + 1) % 2
         net?.send(NetMessage(t: "start", seed: seed, round: round, first: first), reliable: true)
         startGame(.online, seed: seed, me: 0, first: first, round: round)
+        announceRival()
+    }
+
+    private func announceRival() {
+        guard let r = rival, !r.name.isEmpty else { return }
+        show(toast: Tx.versus(r.name, Tx.league(League.of(r.trophies)), r.level))
     }
 
     private func netMessage(_ m: NetMessage) {
@@ -430,29 +633,33 @@ final class GameController: NSObject, ObservableObject {
         case "hello":
             guard let n = m.nonce else { return }
             if n == myNonce { netConnected(); return }
+            // What the opponent tells us about themselves is shown, never trusted for anything else.
+            rival = (Profile.cleanName(m.name ?? ""), min(100_000, max(0, m.trophies ?? 0)), min(999, max(1, m.level ?? 1)))
             isHost = myNonce > n
             if isHost && round == 0 { hostNewRound() }
         case "start":
             guard !isHost, let seed = m.seed, let r = m.round, let first = m.first, first == 0 || first == 1 else { return }
             startGame(.online, seed: seed, me: 1, first: first, round: r)
+            announceRival()
         case "aim":
             guard phase == .aim, driver == .remote, let y = m.yaw, let p = m.power, y.isFinite, p.isFinite else { return }
             remoteAim = Aim(yaw: min(K.maxYaw, max(-K.maxYaw, y)), power: min(100, max(0, p)))
-        case "shot":
+        case "shot", "skip":
             pendingShot = m
             checkRemote()
         case "again":
             guard m.round == round else { return }
             oppAgain = true
-            if isHost && wantAgain { hostNewRound() } else if !wantAgain, over != nil { over?.detail = "Rakip tekrar oynamak istiyor." }
+            if isHost && wantAgain { hostNewRound() } else if !wantAgain, over != nil { over?.detail = Tx.rematchWanted }
         default: break
         }
     }
 
-    /// Plays the opponent's shot once it has arrived and it is their turn here too.
+    /// Plays the opponent's move (a shot or a timed-out turn) once it has arrived and it is their turn here too.
     private func checkRemote() {
-        guard mode == .online, phase == .aim, driver == .remote, let m = pendingShot,
-              m.round == round, m.k == battle.shot, let pb = m.p, let vb = m.v, pb.count == 3, vb.count == 3 else { return }
+        guard mode == .online, phase == .aim, driver == .remote, let m = pendingShot, m.round == round, m.k == battle.shot else { return }
+        if m.t == "skip" { pendingShot = nil; skipTurn(send: false); return }
+        guard let pb = m.p, let vb = m.v, pb.count == 3, vb.count == 3 else { return }
         let p0 = Vec3(x: Double(bitPattern: pb[0]), y: Double(bitPattern: pb[1]), z: Double(bitPattern: pb[2]))
         let v0 = Vec3(x: Double(bitPattern: vb[0]), y: Double(bitPattern: vb[1]), z: Double(bitPattern: vb[2]))
         let sp = v0.length
@@ -460,7 +667,7 @@ final class GameController: NSObject, ObservableObject {
         pendingShot = nil
         let s = battle.turn
         if let y = m.yaw, let p = m.power, y.isFinite, p.isFinite { aims[s] = Aim(yaw: min(K.maxYaw, max(-K.maxYaw, y)), power: min(100, max(0, p))) }
-        launch(side: s, p0: p0, v0: v0, d: Vec3(x: v0.x / sp, y: v0.y / sp, z: v0.z / sp))
+        launch(side: s, p0: p0, v0: v0, d: Vec3(x: v0.x / sp, y: v0.y / sp, z: v0.z / sp), mega: m.mega == true)
     }
 
     // MARK: Frame update
@@ -486,12 +693,15 @@ final class GameController: NSObject, ObservableObject {
                 let k = 1 - exp(-10 * dt)
                 aims[s].yaw += (r.yaw - aims[s].yaw) * k
                 aims[s].power += (r.power - aims[s].power) * k
-            } else if driver == .human, mode == .online {
-                aimSendT -= dt
-                if aimDirty && aimSendT <= 0 {
-                    aimDirty = false; aimSendT = 0.14
-                    net?.send(NetMessage(t: "aim", yaw: aims[s].yaw, power: aims[s].power), reliable: false)
+            } else if driver == .human {
+                if mode == .online {
+                    aimSendT -= dt
+                    if aimDirty && aimSendT <= 0 {
+                        aimDirty = false; aimSendT = 0.14
+                        net?.send(NetMessage(t: "aim", yaw: aims[s].yaw, power: aims[s].power), reliable: false)
+                    }
                 }
+                if timeLeft != nil { runShotClock(dt) }
             }
         }
         if phase == .flight, var f = flight {
@@ -513,6 +723,18 @@ final class GameController: NSObject, ObservableObject {
         world.scene.physicsWorld.speed = CGFloat(ts)
         world.update(dt: dt)
         updateCamera(dt)
+    }
+
+    private func runShotClock(_ dt: Double) {
+        turnT -= dt
+        let left = max(0, Int(turnT.rounded(.up)))
+        if left != timeLeft {
+            timeLeft = left
+            if left > 0 && left <= 5 { sfx.play(.tick) }
+        }
+        guard turnT <= 0 else { return }
+        // A pull that is already drawn goes off; otherwise the turn is lost.
+        if let p = pull, p.armed { dragEnded() } else { skipTurn(send: true) }
     }
 
     private func updateCamera(_ dt: Double) {

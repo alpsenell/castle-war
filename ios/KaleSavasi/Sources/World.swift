@@ -256,6 +256,7 @@ final class World {
     private(set) var cannons: [CannonView] = []
     let ball = SCNNode(geometry: SCNSphere(radius: CGFloat(K.ballR)))
     private var dots: [SCNNode] = []
+    private let targetNode = World.makeTargetNode()
     private let looseRoot = SCNNode()
     private var loose: [(node: SCNNode, born: TimeInterval, decor: Bool)] = []
     private var rubble: [SCNNode] = []
@@ -295,6 +296,7 @@ final class World {
         cameraNode.simdPosition = SIMD3(90, 40, 90)
         scene.rootNode.addChildNode(cameraNode)
         scene.rootNode.addChildNode(looseRoot)
+        scene.rootNode.addChildNode(targetNode)
         scene.physicsWorld.gravity = SCNVector3(0, -22, 0)
     }
 
@@ -454,6 +456,7 @@ final class World {
         castleViews.forEach { scene.rootNode.addChildNode($0.root) }
         ball.isHidden = true
         hidePreview()
+        showTarget(nil)
         scene.physicsWorld.speed = 1
     }
 
@@ -471,7 +474,7 @@ final class World {
                 var o = n.simdPosition - c
                 let l = max(simd_length(o), 0.001)
                 o /= l
-                let k = 7 + 12 * (1 - min(1, l / Float(K.blastR))) + Float.random(in: 0...4)
+                let k = 7 + 12 * (1 - min(1, l / Float(res.radius))) + Float.random(in: 0...4)
                 let v = o * k + dir * 7 + SIMD3(Float.random(in: -1.5...1.5), Float.random(in: 3...9), Float.random(in: -1.5...1.5))
                 n.physicsBody?.velocity = SCNVector3(v.x, v.y, v.z)
                 n.physicsBody?.angularVelocity = SCNVector4(Float.random(in: -1...1), Float.random(in: -1...1), Float.random(in: -1...1), Float.random(in: 2...9))
@@ -510,19 +513,25 @@ final class World {
         case .out: break
         case .water: splash(at: res.pos.f, big: true)
         case .ground, .castle:
-            burst(at: c, colors: [0xffd84a, 0xff8a1e, 0xffffff], count: any ? 90 : 36, speed: any ? 20 : 11, life: 0.55, size: 1.1, accel: -6, cone: false, additive: true)
-            burst(at: c + SIMD3(0, 1, 0), colors: [0x6b7176, 0x969ba0], count: any ? 46 : 18, speed: 5, life: 1.9, size: 3.2, accel: 2.5, cone: false)
+            let big = CGFloat(res.radius / K.blastR)
+            burst(at: c, colors: [0xffd84a, 0xff8a1e, 0xffffff], count: (any ? 90 : 36) * big * big, speed: (any ? 20 : 11) * big, life: 0.55, size: 1.1 * big, accel: -6, cone: false, additive: true)
+            burst(at: c + SIMD3(0, 1, 0), colors: [0x6b7176, 0x969ba0], count: (any ? 46 : 18) * big, speed: 5, life: 1.9, size: 3.2 * big, accel: 2.5, cone: false)
+            if res.crit { burst(at: c, colors: [0xffe27a, 0xf2cd37], count: 80, speed: 26, life: 0.8, size: 0.7, accel: -10, cone: false, additive: true) }
             if res.kind == .ground { burst(at: SIMD3(c.x, 0.3, c.z), colors: [0x5aa846, 0x6b3f1d], count: 40, speed: 13, life: 1.0, size: 0.6, accel: -26, cone: true) }
         }
     }
 
     // MARK: Ball, preview, effects
 
-    func fireBall(from p: Vec3, dir d: Vec3, side: Int) {
+    func fireBall(from p: Vec3, dir d: Vec3, side: Int, style: BallStyle, mega: Bool) {
         ball.simdPosition = p.f
         ball.isHidden = false
+        ball.simdScale = SIMD3(repeating: mega ? 1.7 : 1)
+        let m = Look.material(mega ? 0xff5a1e : style.ball, gloss: 0.7)
+        if mega { m.emission.contents = UIColor(hex: 0xff8a1e) }
+        ball.geometry?.materials = [m]
         ball.removeAllParticleSystems()
-        ball.addParticleSystem(World.makeTrail())
+        ball.addParticleSystem(World.makeTrail(color: mega ? 0xff8a1e : style.trail, size: mega ? 0.8 : 0.34, plain: !mega && style.id == 0))
         cannons[side].kick = 1
         burst(at: p.f, colors: [0xffd84a, 0xff8a1e, 0xffffff], count: 28, speed: 16, life: 0.25, size: 0.9, accel: 0, cone: true, direction: d.f, additive: true)
         burst(at: p.f, colors: [0xe9edf0, 0xb9c0c6], count: 30, speed: 7, life: 1.2, size: 2.2, accel: 1.5, cone: true, direction: d.f)
@@ -546,6 +555,39 @@ final class World {
 
     func hidePreview() { dots.forEach { $0.isHidden = true } }
 
+    /// Places or hides the gold target marker. It always faces the camera and draws over the walls.
+    func showTarget(_ p: Vec3?) {
+        guard let p else { targetNode.isHidden = true; return }
+        targetNode.simdPosition = p.f
+        targetNode.isHidden = false
+    }
+
+    private static func makeTargetNode() -> SCNNode {
+        let img = UIGraphicsImageRenderer(size: CGSize(width: 128, height: 128)).image { ctx in
+            let g = ctx.cgContext
+            for (r, hex, w) in [(58.0, Look.ink, 0.0), (52.0, UInt32(0xf2cd37), 0.0), (34.0, Look.ink, 9.0), (14.0, Look.ink, 0.0)] as [(Double, UInt32, Double)] {
+                let rect = CGRect(x: 64 - r, y: 64 - r, width: r * 2, height: r * 2)
+                if w > 0 { g.setStrokeColor(UIColor(hex: hex).cgColor); g.setLineWidth(w); g.strokeEllipse(in: rect) }
+                else { g.setFillColor(UIColor(hex: hex).cgColor); g.fillEllipse(in: rect) }
+            }
+        }
+        let plane = SCNPlane(width: 4.4, height: 4.4)
+        let m = SCNMaterial()
+        m.lightingModel = .constant
+        m.diffuse.contents = img
+        m.isDoubleSided = true
+        m.readsFromDepthBuffer = false
+        m.writesToDepthBuffer = false
+        plane.materials = [m]
+        let n = SCNNode(geometry: plane)
+        n.constraints = [SCNBillboardConstraint()]
+        n.renderingOrder = 50
+        n.castsShadow = false
+        n.isHidden = true
+        n.runAction(.repeatForever(.sequence([.scale(to: 1.25, duration: 0.6), .scale(to: 1, duration: 0.6)])))
+        return n
+    }
+
     private static let dotImage: UIImage = UIGraphicsImageRenderer(size: CGSize(width: 32, height: 32)).image { ctx in
         UIColor.white.setFill()
         ctx.cgContext.fillEllipse(in: CGRect(x: 1, y: 1, width: 30, height: 30))
@@ -558,16 +600,17 @@ final class World {
         return SCNParticlePropertyController(animation: a)
     }()
 
-    private static func makeTrail() -> SCNParticleSystem {
+    private static func makeTrail(color: UInt32, size: CGFloat, plain: Bool) -> SCNParticleSystem {
         let ps = SCNParticleSystem()
         ps.particleImage = dotImage
-        ps.birthRate = 60
-        ps.particleLifeSpan = 0.45
-        ps.particleSize = 0.34
-        ps.particleSizeVariation = 0.1
+        ps.birthRate = plain ? 60 : 90
+        ps.particleLifeSpan = plain ? 0.45 : 0.6
+        ps.particleSize = size
+        ps.particleSizeVariation = size * 0.3
         ps.particleVelocity = 0.3
         ps.spreadingAngle = 180
-        ps.particleColor = UIColor(white: 1, alpha: 0.6)
+        ps.particleColor = UIColor(hex: color, alpha: plain ? 0.6 : 0.85)
+        ps.blendMode = plain ? .alpha : .additive
         ps.isLightingEnabled = false
         ps.propertyControllers = [.opacity: fade]
         return ps

@@ -16,6 +16,11 @@ struct NetMessage: Codable {
     var v: [UInt64]? = nil
     var yaw: Double? = nil
     var power: Double? = nil
+    var mega: Bool? = nil
+    // Sent with "hello": who the opponent is and how they rank.
+    var name: String? = nil
+    var trophies: Int? = nil
+    var level: Int? = nil
 }
 
 /// A two-player connection. All callbacks arrive on the main queue.
@@ -48,12 +53,12 @@ final class GameCenterTransport: NSObject, MatchTransport, GKMatchDelegate, GKMa
     func start() {
         let lp = GKLocalPlayer.local
         if lp.isAuthenticated { lp.register(self); findMatch(invite: nil); return }
-        onStatus?("Game Center'a giriş yapılıyor…", true)
+        onStatus?(Tx.signingIn, true)
         lp.authenticateHandler = { [weak self] vc, error in
             guard let self, !self.stopped else { return }
             if let vc { Self.present(vc); return }
             if lp.isAuthenticated { lp.register(self); self.findMatch(invite: nil) }
-            else { self.onStatus?("Game Center kullanılamıyor. " + (error?.localizedDescription ?? "Ayarlar'dan Game Center'a giriş yap."), false) }
+            else { self.onStatus?(Tx.gameCenterUnavailable(error?.localizedDescription), false) }
         }
     }
 
@@ -65,9 +70,9 @@ final class GameCenterTransport: NSObject, MatchTransport, GKMatchDelegate, GKMa
             req.maxPlayers = 2
             vc = GKMatchmakerViewController(matchRequest: req)
         }
-        guard let vc else { onStatus?("Eşleşme ekranı açılamadı.", false); return }
+        guard let vc else { onStatus?(Tx.matchScreenFailed, false); return }
         vc.matchmakerDelegate = self
-        onStatus?("Rakip aranıyor…", true)
+        onStatus?(Tx.searching, true)
         Self.present(vc)
     }
 
@@ -86,12 +91,12 @@ final class GameCenterTransport: NSObject, MatchTransport, GKMatchDelegate, GKMa
 
     func matchmakerViewControllerWasCancelled(_ viewController: GKMatchmakerViewController) {
         viewController.dismiss(animated: true)
-        onStatus?("Eşleşme iptal edildi.", false)
+        onStatus?(Tx.matchCancelled, false)
     }
 
     func matchmakerViewController(_ viewController: GKMatchmakerViewController, didFailWithError error: Error) {
         viewController.dismiss(animated: true)
-        onStatus?("Eşleşme başarısız: " + error.localizedDescription, false)
+        onStatus?(Tx.matchFailed(error.localizedDescription), false)
     }
 
     func matchmakerViewController(_ viewController: GKMatchmakerViewController, didFind match: GKMatch) {
@@ -150,7 +155,7 @@ final class NearbyTransport: NSObject, MatchTransport, MCSessionDelegate, MCNear
         browser.delegate = self
         advertiser.startAdvertisingPeer()
         browser.startBrowsingForPeers()
-        onStatus?("Yakındaki oyuncu aranıyor. Diğer cihazda da bu ekranı aç.", true)
+        onStatus?(Tx.nearbySearching, true)
     }
 
     func browser(_ browser: MCNearbyServiceBrowser, foundPeer peerID: MCPeerID, withDiscoveryInfo info: [String: String]?) {
@@ -162,7 +167,7 @@ final class NearbyTransport: NSObject, MatchTransport, MCSessionDelegate, MCNear
     func browser(_ browser: MCNearbyServiceBrowser, lostPeer peerID: MCPeerID) {}
 
     func browser(_ browser: MCNearbyServiceBrowser, didNotStartBrowsingForPeers error: Error) {
-        onMain { self.onStatus?("Yerel ağa erişilemedi: " + error.localizedDescription, false) }
+        onMain { self.onStatus?(Tx.localNetworkFailed(error.localizedDescription), false) }
     }
 
     func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didReceiveInvitationFromPeer peerID: MCPeerID, withContext context: Data?, invitationHandler: @escaping (Bool, MCSession?) -> Void) {
@@ -170,7 +175,7 @@ final class NearbyTransport: NSObject, MatchTransport, MCSessionDelegate, MCNear
     }
 
     func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didNotStartAdvertisingPeer error: Error) {
-        onMain { self.onStatus?("Yerel ağa erişilemedi: " + error.localizedDescription, false) }
+        onMain { self.onStatus?(Tx.localNetworkFailed(error.localizedDescription), false) }
     }
 
     func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) {

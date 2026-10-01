@@ -1,0 +1,3 @@
+"CFBundleDisplayName" = "Castle War";
+"CFBundleName" = "Castle War";
+"NSLocalNetworkUsageDescription" = "The local network is used to find a nearby player to play against.";

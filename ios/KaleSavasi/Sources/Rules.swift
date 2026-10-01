@@ -8,7 +8,7 @@ enum K {
     static let gw = 22, gd = 30, gh = 20          // castle grid: depth, width, layers
     static let lh = 1.2                            // layer height
     static let grav = 12.0, dt = 1.0 / 120.0
-    static let ballR = 0.7, blastR = 5.6
+    static let ballR = 0.7, blastR = 5.1
     static let vMin = 20.0, vMax = 42.0, pitch = 32.0
     static let wind = 1.4, lose = 0.2
     static let front = 40.0                        // |x| of each castle's front face
@@ -17,6 +17,9 @@ enum K {
     static let platX = 31.0, platHalf = 3.0, platTop = 2.4
     static let pivotY = platTop + 1.25, muzzle = 2.6
     static let maxYaw = 35.0
+    static let critRange = 3.2, critBoost = 1.25     // gold target: how close counts, and the blast bonus
+    static let megaBoost = 1.45                      // blast bonus of a charged mega shot
+    static let turnSeconds = 20.0                    // shot clock for timed modes
     static let cells = gw * gh * gd
 }
 
@@ -73,6 +76,10 @@ struct ShotResult {
     var kind: HitKind
     var side: Int
     var center: Vec3
+    var shooter = 0
+    var mega = false
+    var crit = false
+    var radius = K.blastR
 }
 
 @inline(__always) func cellIndex(_ x: Int, _ y: Int, _ z: Int) -> Int { (y * K.gw + x) * K.gd + z }
@@ -267,9 +274,9 @@ final class Castle {
     }
 
     /// Blocks removed by a blast at a world point plus everything left with nothing underneath. Does not change state.
-    func damage(at c: Vec3) -> Damage {
+    func damage(at c: Vec3, radius R: Double = K.blastR) -> Damage {
         var out = Damage()
-        let R = K.blastR, lx = s * (c.x - x0), lz = c.z + Double(K.gd) / 2
+        let lx = s * (c.x - x0), lz = c.z + Double(K.gd) / 2
         if lx < -R || lx > Double(K.gw) + R || lz < -R || lz > Double(K.gd) + R { return out }
         var dead = [Bool](repeating: false, count: blocks.count)
         let r2 = R * R
@@ -289,6 +296,22 @@ final class Castle {
         return out
     }
 
+    /// True when nothing stands above at least one cell of the block, so a falling shot can reach it.
+    func isOpenToSky(_ b: Block) -> Bool {
+        for i in 0..<b.len {
+            let x = b.x + (b.dir == 1 ? i : 0), z = b.z + (b.dir == 2 ? i : 0)
+            var covered = false
+            var y = b.y + 1
+            while y < K.gh {
+                let id = cellBlock[cellIndex(x, y, z)]
+                if id >= 0 && blocks[id].alive { covered = true; break }
+                y += 1
+            }
+            if !covered { return true }
+        }
+        return false
+    }
+
     func kill(_ d: Damage) {
         for id in d.blast { blocks[id].alive = false }
         for id in d.fall { blocks[id].alive = false }
@@ -303,6 +326,10 @@ final class Battle {
     let first: Int
     var shot = 0
     let castles: [Castle]
+    /// Mega meter per side, 0...1. Fills by dealing damage and, more slowly, by taking it.
+    private(set) var charge = [0.0, 0.0]
+    /// Consecutive shots that damaged the enemy, per side.
+    private(set) var streak = [0, 0]
 
     init(seed: UInt32, first: Int) {
         self.seed = seed
@@ -320,9 +347,20 @@ final class Battle {
         return (wx, wz)
     }
 
+    /// This turn's gold target: a block on the defender's castle that is open to the sky.
+    /// Landing a shot within `K.critRange` of it is a critical hit.
+    func goldTarget() -> Vec3? {
+        let enemy = castles[1 - turn]
+        let open = enemy.blocks.filter { $0.alive && $0.y >= 2 && enemy.isOpenToSky($0) }
+        guard !open.isEmpty else { return nil }
+        var r = Mulberry32(seed ^ (UInt32(truncatingIfNeeded: shot + 1) &* 0x85EB_CA6B))
+        _ = r.next()
+        return enemy.center(of: open[min(open.count - 1, Int(r.next() * Double(open.count)))])
+    }
+
     /// Fixed-step flight. Uses only additions, multiplications and one square root, so two devices
     /// fed the same launch position and velocity agree on the result.
-    func simulate(p0: Vec3, v0: Vec3, wind w: (x: Double, z: Double)) -> ShotResult {
+    func simulate(p0: Vec3, v0: Vec3, wind w: (x: Double, z: Double), mega: Bool = false) -> ShotResult {
         var x = p0.x, y = p0.y, z = p0.z, vx = v0.x, vy = v0.y, vz = v0.z
         var kind = HitKind.out, side = -1, n = 1
         let r = K.ballR
@@ -345,7 +383,16 @@ final class Battle {
             let sp = (vx * vx + vy * vy + vz * vz).squareRoot()
             c = Vec3(x: x + vx / sp * 1.2, y: y + vy / sp * 1.2, z: z + vz / sp * 1.2)
         }
-        return ShotResult(steps: n, pos: Vec3(x: x, y: y, z: z), vel: Vec3(x: vx, y: vy, z: vz), kind: kind, side: side, center: c)
+        var res = ShotResult(steps: n, pos: Vec3(x: x, y: y, z: z), vel: Vec3(x: vx, y: vy, z: vz), kind: kind, side: side, center: c)
+        res.shooter = turn
+        res.mega = mega && charge[turn] >= 1
+        if kind == .castle, side == 1 - turn, let t = goldTarget() {
+            let dx = x - t.x, dy = y - t.y, dz = z - t.z
+            res.crit = dx * dx + dy * dy + dz * dz <= K.critRange * K.critRange
+        }
+        if res.mega { res.radius *= K.megaBoost }
+        if res.crit { res.radius *= K.critBoost }
+        return res
     }
 
     func trace(p0: Vec3, v0: Vec3, wind w: (x: Double, z: Double), steps: Int) -> [Vec3] {
@@ -362,13 +409,30 @@ final class Battle {
     }
 
     func apply(_ res: ShotResult) -> [Damage] {
-        castles.map { c in
+        let dmg: [Damage] = castles.map { c in
             guard res.kind == .castle || res.kind == .ground else { return Damage() }
-            let d = c.damage(at: res.center)
+            let d = c.damage(at: res.center, radius: res.radius)
             c.kill(d)
             return d
         }
+        let s = res.shooter, e = 1 - s
+        let dealt = Double(dmg[e].cells) / Double(castles[e].total)
+        if res.mega { charge[s] = 0 }
+        if dealt > 0 {
+            streak[s] += 1
+            if !res.mega {
+                let combo = 1 + 0.2 * Double(min(streak[s] - 1, 3))
+                charge[s] = min(1, charge[s] + dealt * 2.4 * combo + (res.crit ? 0.15 : 0))
+            }
+            charge[e] = min(1, charge[e] + dealt * 1.5)      // taking damage charges the defender: a way back in
+        } else {
+            streak[s] = 0
+        }
+        return dmg
     }
+
+    /// The side to move let the shot clock run out.
+    func forfeitTurn() { streak[turn] = 0 }
 
     func loser() -> Int? { castles.firstIndex { $0.pct < K.lose } }
 }
@@ -399,7 +463,7 @@ enum Ballistics {
 enum Difficulty: String, CaseIterable, Identifiable {
     case kolay, orta, zor
     var id: String { rawValue }
-    var title: String { self == .kolay ? "Kolay" : self == .orta ? "Orta" : "Zor" }
+    var goldChance: Double { self == .kolay ? 0.15 : self == .orta ? 0.4 : 0.75 }
     var samples: Int { self == .kolay ? 1 : self == .orta ? 3 : 12 }
     var yawNoise: Double { self == .kolay ? 5.0 : self == .orta ? 2.2 : 0.7 }
     var speedNoise: Double { self == .kolay ? 0.075 : self == .orta ? 0.035 : 0.012 }
@@ -430,19 +494,48 @@ enum Computer {
         return (yaw * 180 / .pi, v)
     }
 
-    static func choose(battle: Battle, side: Int, difficulty: Difficulty, wind w: (x: Double, z: Double)) -> Aim {
+    static func choose(battle: Battle, side: Int, difficulty: Difficulty, wind w: (x: Double, z: Double)) -> (aim: Aim, mega: Bool) {
         let enemy = battle.castles[1 - side]
         let alive = enemy.blocks.filter { $0.alive }
-        guard !alive.isEmpty else { return Aim() }
+        guard !alive.isEmpty else { return (Aim(), false) }
+        let mega = battle.charge[side] >= 1 && (difficulty != .kolay || Bool.random())
+        let radius = K.blastR * (mega ? K.megaBoost : 1)
         var best = enemy.center(of: alive[0]), bestScore = -1
         for _ in 0..<difficulty.samples {
             let c = enemy.center(of: alive.randomElement()!)
-            let score = enemy.damage(at: c).cells
+            let score = enemy.damage(at: c, radius: radius).cells
             if score > bestScore { bestScore = score; best = c }
+        }
+        // Sometimes go for the gold target instead; better players do it more often.
+        if Double.random(in: 0...1) < difficulty.goldChance, let t = battle.goldTarget() {
+            let score = enemy.damage(at: t, radius: radius * K.critBoost).cells
+            if score > bestScore { bestScore = score; best = t }
         }
         let sol = solve(side: side, target: best, wind: w) ?? (yaw: 0, v: 32)
         let v = sol.v * (1 + gauss() * difficulty.speedNoise)
         let yaw = sol.yaw + gauss() * difficulty.yawNoise
-        return Aim(yaw: min(max(yaw, -K.maxYaw), K.maxYaw), power: min(max((v - K.vMin) / (K.vMax - K.vMin) * 100, 0), 100))
+        return (Aim(yaw: min(max(yaw, -K.maxYaw), K.maxYaw), power: min(max((v - K.vMin) / (K.vMax - K.vMin) * 100, 0), 100)), mega)
     }
+}
+
+// MARK: - Daily siege
+
+/// Solo score attack: the same castle, winds and gold targets for every player on a given day.
+enum Challenge {
+    static let shots = 8
+
+    static func seed(day: String) -> UInt32 {
+        var h: UInt32 = 2_166_136_261
+        for b in ("siege-" + day).utf8 { h = (h ^ UInt32(b)) &* 16_777_619 }
+        return h
+    }
+
+    /// Points for one shot: damage first, then precision and consistency.
+    static func points(dealt: Int, crit: Bool, streak: Int) -> Int {
+        guard dealt > 0 else { return 0 }
+        return dealt * 10 + (crit ? 50 : 0) + (streak >= 2 ? 10 * min(streak, 5) : 0)
+    }
+
+    /// Bringing the castle under the losing line early pays for every shot left unused.
+    static func clearBonus(unusedShots: Int) -> Int { 150 + 75 * unusedShots }
 }

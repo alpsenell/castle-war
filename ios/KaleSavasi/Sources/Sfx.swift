@@ -2,7 +2,7 @@ import AVFoundation
 
 /// Short synthesized sound effects; nothing is loaded from disk.
 final class Sfx {
-    enum Sound: CaseIterable { case fire, hit, thud, splash, win, lose, tick }
+    enum Sound: CaseIterable { case fire, hit, thud, splash, win, lose, tick, crit, charged }
 
     var enabled = true
     private let engine = AVAudioEngine()
@@ -83,6 +83,8 @@ final class Sfx {
         case .win: return mix(0.9, [523.0, 659, 784, 1047].enumerated().map { sweep(0.26, $0.element, $0.element, 0.25, delay: Double($0.offset) * 0.14, triangle: true) })
         case .lose: return mix(0.95, [392.0, 330, 262].enumerated().map { sweep(0.32, $0.element, $0.element, 0.25, delay: Double($0.offset) * 0.2, triangle: true) })
         case .tick: return mix(0.05, [sweep(0.04, 1200, 900, 0.12)])
+        case .crit: return mix(0.5, [sweep(0.16, 880, 880, 0.22, triangle: true), sweep(0.3, 1320, 1320, 0.22, delay: 0.1, triangle: true)])
+        case .charged: return mix(0.45, [sweep(0.4, 220, 880, 0.2, triangle: true)])
         }
     }
 }
