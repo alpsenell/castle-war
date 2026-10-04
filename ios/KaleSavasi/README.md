@@ -43,14 +43,25 @@ The castle you defend is your own design, and its job is to keep the heart out o
 builder is a grid of 11 × 15 tiles seen from above, with a live 3D preview beside it. Six
 pieces cost stone: low and high walls (one tile), towers, tall towers and bastions (2 × 2), and
 the keep (3 × 3). The heart (one tile) is free. A castle needs exactly one heart, at most one
-keep, at least 1,200 stone and at most 2,400. Castles saved before hearts existed get one
+keep, at most two decoys, at least 1,200 stone and at most 2,400.
+
+Four pieces exist mainly to protect the heart:
+
+| Piece | Size | Stone | Rule |
+| --- | --- | --- | --- |
+| Iron wall | 1 tile | 52 | Every stone in it takes two blasts: the first cracks it, the second breaks it. |
+| Shelter | 3 × 3 | 118 | A stone roof on two side walls, open front and back. Its middle tile is left free for the heart or a decoy, and the roof stops shots that drop from above. |
+| Moat | 1 tile | 30 | A shot that lands in the water splashes and does not go off. |
+| Decoy heart | 1 tile | 80 | Looks and breaks exactly like the heart. Hitting it gives it away (its gem pops and the crystal goes grey) but wins nothing. The computer cannot tell decoys from the heart either. | Castles saved before hearts existed get one
 placed automatically on the free tile nearest the back centre. Tall towers and bastions unlock with campaign
 stars. Online, each player's design is sent at the start of the match and checked against
 these rules on arrival; anything that fails becomes the classic layout. Both devices must run
 the same rules version, or the lobby says so and stops.
 
 Design matters: in computer-versus-computer tests against the classic layout, the ready-made
-castles won between 29 % and 59 % of matches.
+castles won between 32 % and 62 % of matches. Several of them use the new pieces: the outpost
+has a moat across its front, the spires and the citadel hide a decoy, the bulwark has iron in
+its front wall and the stronghold keeps its heart under a shelter.
 
 ### Special shots, balloons and match twists
 

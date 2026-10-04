@@ -439,6 +439,10 @@ enum PieceLook {
         case .bastion: return Color(hex: 0x9a7b52)
         case .keep: return Color(hex: 0xc62d1f)
         case .heart: return Paint.heart
+        case .wallStrong: return Color(hex: 0x4e555c)
+        case .shelter: return Color(hex: 0x8f7e66)
+        case .moat: return Color(hex: 0x3f8fc4)
+        case .decoy: return Color(hex: 0xe58bb0)
         }
     }
     static func icon(_ k: PieceKind) -> String {
@@ -450,6 +454,10 @@ enum PieceLook {
         case .bastion: return "square.fill"
         case .keep: return "crown.fill"
         case .heart: return "heart.fill"
+        case .wallStrong: return "shield.fill"
+        case .shelter: return "house.fill"
+        case .moat: return "water.waves"
+        case .decoy: return "heart"
         }
     }
 }
@@ -469,13 +477,20 @@ struct DesignGrid: View {
                 var p = Path(); p.move(to: CGPoint(x: CGFloat(c) * cell, y: 0)); p.addLine(to: CGPoint(x: CGFloat(c) * cell, y: size.height))
                 ctx.stroke(p, with: .color(Paint.ink.opacity(0.14)), lineWidth: 1)
             }
-            for piece in design.pieces {
+            // Shelters first: whatever sits in the middle of one is drawn on top.
+            for piece in design.pieces.sorted(by: { ($0.kind == .shelter ? 0 : 1) < ($1.kind == .shelter ? 0 : 1) }) {
                 let n = piece.kind.span
                 // Row 0 is the back of the castle, drawn at the bottom.
                 let rect = CGRect(x: CGFloat(piece.tz) * cell, y: CGFloat(rows - piece.tx - n) * cell, width: CGFloat(n) * cell, height: CGFloat(n) * cell).insetBy(dx: 1, dy: 1)
                 ctx.fill(Path(roundedRect: rect, cornerRadius: n == 1 ? 3 : 5), with: .color(PieceLook.color(piece.kind)))
                 ctx.stroke(Path(roundedRect: rect, cornerRadius: n == 1 ? 3 : 5), with: .color(Paint.ink), lineWidth: 1.5)
-                if piece.kind == .heart {
+                if piece.kind == .shelter {
+                    let hole = CGRect(x: rect.minX + cell - 1, y: rect.minY + cell - 1, width: cell, height: cell).insetBy(dx: 2, dy: 2)
+                    ctx.fill(Path(roundedRect: hole, cornerRadius: 3), with: .color(Color(hex: 0xe9efe2)))
+                    ctx.stroke(Path(roundedRect: hole, cornerRadius: 3), with: .color(Paint.ink.opacity(0.5)), style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
+                    let mark = ctx.resolve(Image(systemName: PieceLook.icon(piece.kind)))
+                    ctx.draw(mark, in: CGRect(x: rect.minX + 3, y: rect.minY + 3, width: cell * 0.7, height: cell * 0.7))
+                } else if piece.kind == .heart || piece.kind == .decoy || piece.kind == .wallStrong || piece.kind == .moat {
                     var mark = ctx.resolve(Image(systemName: PieceLook.icon(piece.kind)))
                     mark.shading = .color(.white)
                     ctx.draw(mark, in: rect.insetBy(dx: rect.width * 0.18, dy: rect.height * 0.18))
@@ -517,14 +532,19 @@ struct BuilderView: View {
                         .onEnded { _ in game.strokeEnded() })
                     .accessibilityLabel(Tx.buildCastle)
                 Text(Tx.builderBack).font(Paint.text(9, .heavy)).foregroundStyle(Paint.muted).frame(maxWidth: .infinity)
-                HStack(spacing: 4) {
+            }
+            .padding(12)
+            .frame(width: cell * CGFloat(CastleDesign.cols) + 24)
+            .modifier(Plate(radius: 16))
+            VStack(spacing: 4) {
+                LazyVGrid(columns: [GridItem(.fixed(38), spacing: 4), GridItem(.fixed(38), spacing: 4)], spacing: 4) {
                     ForEach(PieceKind.allCases) { k in toolButton(k) }
                     Button { game.pick(tool: nil) } label: {
                         VStack(spacing: 1) {
                             Image(systemName: "eraser.fill").font(.system(size: 13, weight: .bold))
                             Text(Tx.eraser).font(Paint.text(8, .heavy))
                         }
-                        .foregroundStyle(Paint.ink).frame(width: 34, height: 36)
+                        .foregroundStyle(Paint.ink).frame(width: 38, height: 32)
                         .background(RoundedRectangle(cornerRadius: 8).fill(game.erasing ? Paint.yellow : Paint.track.opacity(0.7)))
                         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Paint.ink, lineWidth: game.erasing ? 2.5 : 1))
                     }
@@ -532,9 +552,9 @@ struct BuilderView: View {
                     .accessibilityLabel(Tx.eraser)
                 }
             }
-            .padding(12)
-            .frame(width: cell * CGFloat(CastleDesign.cols) + 24)
+            .padding(8)
             .modifier(Plate(radius: 16))
+            .padding(.leading, 6)
             Spacer(minLength: 0)
             VStack(alignment: .trailing, spacing: 8) {
                 Button { game.closeBuilder() } label: {
@@ -563,7 +583,8 @@ struct BuilderView: View {
     private var toolLine: String {
         if game.erasing { return Tx.builderHint }
         guard let k = game.tool else { return Tx.builderHint }
-        return "\(Tx.piece(k)) · \(CastleDesign.cost(of: k))"
+        let line = "\(Tx.piece(k)) · \(CastleDesign.cost(of: k))"
+        return Tx.pieceInfo(k).map { line + "\n" + $0 } ?? line
     }
 
     private func toolButton(_ k: PieceKind) -> some View {
@@ -578,7 +599,7 @@ struct BuilderView: View {
                 }
                 Text("\(CastleDesign.cost(of: k))").font(Paint.text(9, .heavy)).monospacedDigit()
             }
-            .foregroundStyle(Paint.ink).frame(width: 34, height: 36)
+            .foregroundStyle(Paint.ink).frame(width: 38, height: 32)
             .background(RoundedRectangle(cornerRadius: 8).fill(on ? Paint.yellow : Paint.track.opacity(0.7)))
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Paint.ink, lineWidth: on ? 2.5 : 1))
             .opacity(owned ? 1 : 0.55)
