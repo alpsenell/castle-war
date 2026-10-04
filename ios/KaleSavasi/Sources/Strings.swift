@@ -90,6 +90,9 @@ enum Tx {
     static var ownCastle: String { p("Kendi kaleni vurdun!", "You hit your own castle!") }
     static var heartHit: String { p("Kalp çatladı!", "Heart cracked!") }
     static var heartBroken: String { p("Kalp kırıldı!", "Heart shattered!") }
+    static var decoyFound: String { p("Sahte kalpmiş!", "It was a decoy!") }
+    static var stoneCracked: String { p("Demir duvar çatladı", "Iron wall cracked") }
+    static var moat: String { p("Gülle hendeğe düştü", "Into the moat") }
     static var ownHeart: String { p("Kendi kalbini vurdun!", "You hit your own heart!") }
     static var timeUp: String { p("Süre doldu", "Time's up") }
 
@@ -258,6 +261,20 @@ enum Tx {
         case .bastion: return p("Tabya", "Bastion")
         case .keep: return p("İç kale", "Keep")
         case .heart: return p("Kalp", "Heart")
+        case .wallStrong: return p("Demir duvar", "Iron wall")
+        case .shelter: return p("Sundurma", "Shelter")
+        case .moat: return p("Hendek", "Moat")
+        case .decoy: return p("Sahte kalp", "Decoy heart")
+        }
+    }
+    static func pieceInfo(_ k: PieceKind) -> String? {
+        switch k {
+        case .wallStrong: return p("Her taşı iki patlamada kırılır", "Each stone takes two blasts")
+        case .shelter: return p("Ortasına kalbi koy: yukarıdan gelen atışları durdurur", "Put the heart in the middle: stops shots from above")
+        case .moat: return p("İçine düşen gülle patlamaz", "A shot that lands in it does not go off")
+        case .decoy: return p("Rakip gerçeğinden ayıramaz. En çok \(CastleDesign.maxDecoys)", "Looks real to the enemy. Up to \(CastleDesign.maxDecoys)")
+        case .heart: return p("Bedava. Korunacak olan bu", "Free. This is what you defend")
+        default: return nil
         }
     }
     static var eraser: String { p("Sil", "Erase") }
@@ -274,6 +291,7 @@ enum Tx {
         switch pr {
         case .noHeart: return p("Kalbi yerleştir: korunacak tek şey o.", "Place the heart: it is what you defend.")
         case .manyHearts: return p("Yalnızca bir kalp olabilir.", "Only one heart is allowed.")
+        case .manyDecoys: return p("En çok \(CastleDesign.maxDecoys) sahte kalp olabilir.", "At most \(CastleDesign.maxDecoys) decoy hearts.")
         case .manyKeeps: return p("Yalnızca bir iç kale olabilir.", "Only one keep is allowed.")
         case .tooSmall: return p("Kale çok küçük: en az \(CastleDesign.minimum) taş kullan.", "Too small: use at least \(CastleDesign.minimum) stone.")
         case .overBudget: return p("Taş sınırı aşıldı.", "Over the stone limit.")
@@ -301,6 +319,7 @@ enum Tx {
             ("balloon.fill", p("Balonun içinden atış geçirirsen ödülü kaparsın: onarım, kalkan ya da mega şarj.", "Shoot through a balloon to grab its prize: repair, shield or mega charge.")),
             ("heart.fill", p("Her kalenin bir kalbi var. Rakibin kalbini kıran kazanır.", "Every castle guards a heart. Shatter the enemy heart to win.")),
             ("building.columns.fill", p("Kaleni kendin kur: kalbi duvarların, kulelerin arkasına sakla.", "Build your own castle: hide the heart behind walls and towers.")),
+            ("shield.lefthalf.filled", p("Sundurma kalbi yukarıdan korur, demir duvar iki darbe alır, hendek gülleyi yutar. Sahte kalplerle rakibi şaşırt.", "A shelter roofs the heart, iron walls take two blasts, moats swallow shots. Decoy hearts fool the enemy.")),
         ]
     }
     static var quitTitle: String { p("Maçtan çıkılsın mı?", "Leave the match?") }

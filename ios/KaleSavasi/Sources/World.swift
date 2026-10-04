@@ -96,9 +96,26 @@ enum Look {
         return m
     }
 
-    /// A castle's mesh materials: three stone shades, team colour, trim, heart.
+    /// Dark stone with iron bands, for walls that take two blasts.
+    static func ironMaterial(cracked: Bool) -> SCNMaterial {
+        let m = stoneMaterial(cracked ? 0x3d4146 : 0x5d646b)
+        m.metalness.contents = cracked ? 0.1 : 0.35
+        m.roughness.contents = cracked ? 0.95 : 0.7
+        return m
+    }
+
+    static let moatWater: SCNMaterial = {
+        let m = Look.solid(0x1f5a7d, roughness: 0.08, metal: 0.55)
+        m.normal.contents = Textures.waterNormal
+        m.normal.intensity = 0.5
+        return m
+    }()
+
+    /// A castle's mesh materials: three stone shades, team colour, trim, heart (decoys use it too),
+    /// iron, cracked iron, and the dull crystal of a decoy that has been found out.
     static func castleMaterials(_ side: Int) -> [SCNMaterial] {
-        stone[side].map(stoneMaterial) + [stoneMaterial(accent[side]), stoneMaterial(trim[side]), heartMaterial()]
+        stone[side].map(stoneMaterial) + [stoneMaterial(accent[side]), stoneMaterial(trim[side]), heartMaterial(),
+                                          ironMaterial(cracked: false), ironMaterial(cracked: true), solid(0x77707c, roughness: 0.55)]
     }
 }
 
@@ -205,8 +222,8 @@ final class CastleView {
     private let joint: Float = 0.03
     /// How far each stone's edges are rounded off.
     private let bevel: Float = 0.11
-    /// The floating gem and glow above the heart, until it breaks.
-    private(set) var heartNode: SCNNode?
+    /// The floating gems above the heart (decoy nil) and each decoy, until they break.
+    private var gems: [(node: SCNNode, decoy: Int?)] = []
 
     /// `physics` is off for the builder preview, where nothing ever falls.
     init(castle: Castle, physics: Bool = true) {
@@ -217,7 +234,8 @@ final class CastleView {
         colorOf = castle.blocks.map { b in
             if b.mat == 2 { return 3 }
             if b.mat == 3 { return 4 }
-            if b.mat == 4 { return 5 }
+            if b.mat == 4 || b.mat == 6 { return 5 }
+            if b.mat == 5 { return 6 }
             let r = rnd.next()
             return r < 0.5 ? 0 : r < 0.8 ? 1 : 2
         }
@@ -248,13 +266,22 @@ final class CastleView {
             }
             decor.append((n, ids, true))
         }
-        if let c = castle.heartCenter { addHeartGem(at: c) }
+        if let c = castle.heartCenter { addGem(at: c, decoy: nil) }
+        for i in castle.decoyRevealed.indices { if let c = castle.decoyCenter(i) { addGem(at: c, decoy: i) } }
+        for m in castle.moats {
+            let water = SCNNode(geometry: SCNPlane(width: 2, height: 2))
+            water.geometry?.materials = [Look.moatWater]
+            water.eulerAngles.x = -.pi / 2
+            water.simdPosition = castle.worldPoint(gx: Double(m.x) + 1, gy: 0.06 / K.lh, gz: Double(m.z) + 1).f
+            water.castsShadow = false
+            root.addChildNode(water)
+        }
         rebuildMesh()
     }
 
-    private func addHeartGem(at c: Vec3) {
+    private func addGem(at c: Vec3, decoy: Int?) {
         let n = SCNNode()
-        n.simdPosition = c.f + SIMD3(0, 3.1, 0)
+        n.simdPosition = c.f + SIMD3(0, 2.6, 0)
         let crystal = Look.heartMaterial()
         for flip in [false, true] {
             let half = SCNNode(geometry: SCNPyramid(width: 1.1, height: 1.0, length: 1.1))
@@ -272,16 +299,23 @@ final class CastleView {
         n.runAction(.repeatForever(.rotateBy(x: 0, y: .pi * 2, z: 0, duration: 4)))
         n.runAction(.repeatForever(.sequence([.moveBy(x: 0, y: 0.4, z: 0, duration: 1.1), .moveBy(x: 0, y: -0.4, z: 0, duration: 1.1)])))
         root.addChildNode(n)
-        heartNode = n
+        gems.append((n, decoy))
     }
 
-    /// Takes the gem down once the heart is gone. Returns where it was.
-    fileprivate func breakHeart() -> SIMD3<Float>? {
-        guard let n = heartNode else { return nil }
-        heartNode = nil
+    /// Takes down the gem of the heart (decoy nil) or of a decoy. Returns where it was.
+    fileprivate func breakGem(decoy: Int?) -> SIMD3<Float>? {
+        guard let i = gems.firstIndex(where: { $0.decoy == decoy }) else { return nil }
+        let n = gems.remove(at: i).node
         let p = n.presentation.simdWorldPosition
         n.removeFromParentNode()
         return p
+    }
+
+    /// The material a block shows right now: cracked iron and found-out decoys change.
+    fileprivate func look(_ b: Block) -> Int {
+        if b.mat == 5 && b.hp < 2 { return 7 }
+        if b.mat == 6, let d = castle.decoyOf[b.id], castle.decoyRevealed[d] { return 8 }
+        return colorOf[b.id]
     }
 
     private func addFixedBody(_ b: Block) {
@@ -301,7 +335,7 @@ final class CastleView {
         for b in castle.blocks where b.alive {
             let c = castle.center(of: b).f
             let size: SIMD3<Float> = b.dir == 1 ? SIMD3(Float(b.len), Float(K.lh), 1) : SIMD3(1, Float(K.lh), Float(b.len))
-            mb.addBox(center: c, size: size - SIMD3(repeating: joint), material: colorOf[b.id], bevel: bevel)
+            mb.addBox(center: c, size: size - SIMD3(repeating: joint), material: look(b), bevel: bevel)
         }
         meshNode.geometry = mb.geometry(materials: materials)
     }
@@ -311,12 +345,12 @@ final class CastleView {
         let b = castle.blocks[id]
         let old = fixedBodies.removeValue(forKey: id)
         old?.removeFromParentNode()
-        let key = b.len * 10 + colorOf[id]
+        let key = b.len * 10 + look(b)
         let geo: SCNGeometry
         if let g = looseGeo[key] { geo = g } else {
             let g = SCNBox(width: CGFloat(b.len) - 0.06, height: CGFloat(K.lh) - 0.06, length: 0.94, chamferRadius: CGFloat(bevel))
             g.chamferSegmentCount = 3
-            g.materials = [materials[colorOf[id]]]
+            g.materials = [materials[look(b)]]
             looseGeo[key] = g
             geo = g
         }
@@ -696,7 +730,7 @@ final class World {
         let dir = SIMD3<Float>(Float(res.vel.x / sp), Float(res.vel.y / sp), Float(res.vel.z / sp))
         let centers = res.blasts.map { ($0.center.f, Float($0.radius)) }
         var any = false
-        for (i, d) in outcome.damage.enumerated() where d.cells > 0 {
+        for (i, d) in outcome.damage.enumerated() where d.cells > 0 || !d.crack.isEmpty {
             any = true
             let view = castleViews[i]
             for id in d.blast {
@@ -713,6 +747,9 @@ final class World {
                 n.physicsBody?.angularVelocity = SCNVector4(Float.random(in: -1...1), Float.random(in: -1...1), Float.random(in: -1...1), Float.random(in: 2...9))
                 looseRoot.addChildNode(n)
                 loose.append((n, clock, false))
+            }
+            for id in d.crack where view.castle.blocks[id].alive {
+                burst(at: view.castle.center(of: view.castle.blocks[id]).f, colors: [0x5c6166, 0xb5b9bd], count: 8, speed: 3, life: 1.2, size: 1.0, accel: 1, cone: false, grow: 1.6, alpha: 0.5)
             }
             for id in d.fall {
                 let n = view.release(id)
@@ -740,9 +777,13 @@ final class World {
                 looseRoot.addChildNode(n)
                 loose.append((n, clock, true))
             }
-            if view.castle.heartLost, let p = view.breakHeart() {
+            if view.castle.heartLost, let p = view.breakGem(decoy: nil) {
                 burst(at: p, colors: [Look.heartGlow, 0xffffff, 0xffb3d1], count: 160, speed: 22, life: 1.2, size: 0.9, accel: -9, cone: false, additive: true)
                 flash(at: p, strength: 5200)
+            }
+            for k in d.decoys {
+                guard let p = view.breakGem(decoy: k) else { continue }
+                burst(at: p, colors: [0x8d8794, 0xc9c3cf], count: 50, speed: 7, life: 1.4, size: 1.6, accel: 2, cone: false, grow: 1.8, alpha: 0.6)
             }
             view.rebuildMesh()
         }

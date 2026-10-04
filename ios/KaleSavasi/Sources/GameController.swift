@@ -372,6 +372,7 @@ final class GameController: NSObject, ObservableObject {
         guard next.fits(kind, row: tx, col: tz) else { if fresh { builderNote = Tx.noRoom }; return }
         next.pieces.append(Piece(kind: kind, tx: tx, tz: tz))
         guard next.cost <= CastleDesign.budget else { builderNote = Tx.noStone; return }
+        guard next.decoys <= CastleDesign.maxDecoys else { builderNote = Tx.problem(.manyDecoys); return }
         draft = next
         draftChanged()
     }
@@ -531,7 +532,7 @@ final class GameController: NSObject, ObservableObject {
         var msg = Tx.miss
         switch res.kind {
         case .out: break
-        case .water: msg = Tx.water
+        case .water: msg = abs(res.pos.x) < K.river ? Tx.water : Tx.moat
         case .ground, .castle:
             sfx.play(any ? .hit : .thud)
             shake = any ? (res.mega ? 1.4 : 0.9) : 0.3
@@ -541,6 +542,8 @@ final class GameController: NSObject, ObservableObject {
                 if mode == .challenge { msg += "  ·  " + Tx.points(earned) }
                 else if battle.streak[f.side] >= 2 { msg += "  ·  " + Tx.streak(battle.streak[f.side]) }
             } else if out.damage[f.side].cells > 0 { msg = Tx.ownCastle }
+            if dealt == 0, !out.damage[enemy].crack.isEmpty { msg = Tx.stoneCracked }
+            if !out.damage[enemy].decoys.isEmpty { msg = Tx.decoyFound + "  ·  " + msg }
             if out.damage[enemy].heart > 0 { msg = (battle.castles[enemy].heartLost ? Tx.heartBroken : Tx.heartHit) + "  ·  " + msg }
             else if out.damage[f.side].heart > 0 { msg = Tx.ownHeart }
             if out.shieldBroken != nil { msg = Tx.shieldBroken + "  ·  " + msg }
