@@ -116,8 +116,9 @@ struct RootView: View {
                         .onEnded { _ in game.pinchEnded() })
                 if game.screen == .playing || game.screen == .over {
                     PullOverlay().ignoresSafeArea().allowsHitTesting(false)
-                    HUDView()
+                    HUDView().opacity(game.finale ? 0 : 1)
                 }
+                if game.finale { FinaleBars().transition(.opacity) }
                 switch game.screen {
                 case .menu:
                     switch game.panel {
@@ -126,6 +127,7 @@ struct RootView: View {
                     case .settings: SettingsView()
                     case .howTo: HowToView()
                     case .campaign: CampaignView()
+                    case .achievements: AchievementsView()
                     }
                 case .lobby: LobbyView()
                 case .over: if game.over != nil { OverView() }
@@ -136,6 +138,7 @@ struct RootView: View {
                 if let t = game.toast { ToastView(text: t).transition(.opacity.combined(with: .scale(scale: 0.9))) }
             }
             .animation(.easeOut(duration: 0.2), value: game.toast)
+            .animation(.easeInOut(duration: 0.35), value: game.finale)
             .onAppear { game.viewSize = geo.size }
             .onChange(of: geo.size) { _, new in game.viewSize = new }
         }
@@ -448,6 +451,25 @@ struct PullOverlay: View {
             ctx.fill(Path(roundedRect: box, cornerRadius: box.height / 2), with: .color(ink.opacity(0.85)))
             ctx.draw(text, at: CGPoint(x: box.midX, y: box.midY))
         }
+    }
+}
+
+/// Cinema bars and a title while the shot that breaks a heart plays out in slow motion.
+struct FinaleBars: View {
+    var body: some View {
+        GeometryReader { g in
+            VStack(spacing: 0) {
+                Color.black.frame(height: g.size.height * 0.13)
+                Spacer()
+                ZStack {
+                    Color.black
+                    Text(Tx.finalShot).font(.system(size: 22, weight: .black, design: .rounded)).tracking(6).foregroundStyle(Paint.heart)
+                }
+                .frame(height: g.size.height * 0.13)
+            }
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
     }
 }
 

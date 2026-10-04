@@ -81,10 +81,21 @@ enum Look {
 
     static let heartGlow: UInt32 = 0xff2f7d
 
+    /// Crystal and glow colours of each heart type. Decoys copy the castle's own, so they still pass for the heart.
+    static func heartColors(_ h: HeartKind) -> (body: UInt32, glow: UInt32) {
+        switch h {
+        case .crystal: return (0xc2185b, heartGlow)
+        case .living: return (0x1f9d55, 0x5dff9a)
+        case .aegis: return (0x1f6fc2, 0x6fd0ff)
+        case .titan: return (0xb8690f, 0xffb43a)
+        }
+    }
+
     /// Glowing crystal for the heart, pulsing slowly.
-    static func heartMaterial() -> SCNMaterial {
-        let m = solid(0xc2185b, roughness: 0.18, metal: 0.2)
-        m.emission.contents = UIColor(hex: heartGlow)
+    static func heartMaterial(_ h: HeartKind = .crystal) -> SCNMaterial {
+        let c = heartColors(h)
+        let m = solid(c.body, roughness: 0.18, metal: 0.2)
+        m.emission.contents = UIColor(hex: c.glow)
         m.emission.intensity = 0.7
         let pulse = CABasicAnimation(keyPath: "intensity")
         pulse.fromValue = 0.45
@@ -113,8 +124,8 @@ enum Look {
 
     /// A castle's mesh materials: three stone shades, team colour, trim, heart (decoys use it too),
     /// iron, cracked iron, and the dull crystal of a decoy that has been found out.
-    static func castleMaterials(_ side: Int) -> [SCNMaterial] {
-        stone[side].map(stoneMaterial) + [stoneMaterial(accent[side]), stoneMaterial(trim[side]), heartMaterial(),
+    static func castleMaterials(_ side: Int, heart: HeartKind = .crystal) -> [SCNMaterial] {
+        stone[side].map(stoneMaterial) + [stoneMaterial(accent[side]), stoneMaterial(trim[side]), heartMaterial(heart),
                                           ironMaterial(cracked: false), ironMaterial(cracked: true), solid(0x77707c, roughness: 0.55)]
     }
 }
@@ -229,7 +240,7 @@ final class CastleView {
     init(castle: Castle, physics: Bool = true) {
         self.castle = castle
         self.physics = physics
-        materials = Look.castleMaterials(castle.side)
+        materials = Look.castleMaterials(castle.side, heart: castle.heartKind)
         var rnd = Mulberry32(UInt32(castle.side * 977 + 13))
         colorOf = castle.blocks.map { b in
             if b.mat == 2 { return 3 }
@@ -267,7 +278,7 @@ final class CastleView {
             decor.append((n, ids, true))
         }
         if let c = castle.heartCenter { addGem(at: c, decoy: nil) }
-        for i in castle.decoyRevealed.indices { if let c = castle.decoyCenter(i) { addGem(at: c, decoy: i) } }
+        for i in castle.decoyRevealed.indices where !castle.decoyRevealed[i] { if let c = castle.decoyCenter(i) { addGem(at: c, decoy: i) } }
         for m in castle.moats {
             let water = SCNNode(geometry: SCNPlane(width: 2, height: 2))
             water.geometry?.materials = [Look.moatWater]
@@ -282,7 +293,7 @@ final class CastleView {
     private func addGem(at c: Vec3, decoy: Int?) {
         let n = SCNNode()
         n.simdPosition = c.f + SIMD3(0, 2.6, 0)
-        let crystal = Look.heartMaterial()
+        let crystal = Look.heartMaterial(castle.heartKind)
         for flip in [false, true] {
             let half = SCNNode(geometry: SCNPyramid(width: 1.1, height: 1.0, length: 1.1))
             half.geometry?.materials = [crystal]
@@ -291,7 +302,7 @@ final class CastleView {
         }
         let light = SCNLight()
         light.type = .omni
-        light.color = UIColor(hex: Look.heartGlow)
+        light.color = UIColor(hex: Look.heartColors(castle.heartKind).glow)
         light.intensity = 900
         light.attenuationStartDistance = 1
         light.attenuationEndDistance = 9
@@ -778,7 +789,7 @@ final class World {
                 loose.append((n, clock, true))
             }
             if view.castle.heartLost, let p = view.breakGem(decoy: nil) {
-                burst(at: p, colors: [Look.heartGlow, 0xffffff, 0xffb3d1], count: 160, speed: 22, life: 1.2, size: 0.9, accel: -9, cone: false, additive: true)
+                burst(at: p, colors: [Look.heartColors(view.castle.heartKind).glow, 0xffffff, 0xffb3d1], count: 160, speed: 22, life: 1.2, size: 0.9, accel: -9, cone: false, additive: true)
                 flash(at: p, strength: 5200)
             }
             for k in d.decoys {
@@ -804,6 +815,13 @@ final class World {
             let spots = castleViews[res.shooter].restore(outcome.repaired)
             for p in spots.prefix(14) { burst(at: p, colors: [0x7be08f, 0xffffff], count: 10, speed: 3, life: 1.0, size: 0.6, accel: 4, cone: false, additive: true) }
         }
+    }
+
+    /// Stands blocks back up outside of a shot, such as a living heart growing back.
+    func restoreBlocks(side: Int, ids: [Int]) {
+        guard side < castleViews.count else { return }
+        let glow = Look.heartColors(castleViews[side].castle.heartKind).glow
+        for p in castleViews[side].restore(ids) { burst(at: p, colors: [glow, 0xffffff], count: 24, speed: 4, life: 1.2, size: 0.7, accel: 3, cone: false, additive: true) }
     }
 
     // MARK: Ball, preview, target, balloon, shield

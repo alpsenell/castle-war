@@ -319,6 +319,7 @@ enum Tx {
             ("balloon.fill", p("Balonun içinden atış geçirirsen ödülü kaparsın: onarım, kalkan ya da mega şarj.", "Shoot through a balloon to grab its prize: repair, shield or mega charge.")),
             ("heart.fill", p("Her kalenin bir kalbi var. Rakibin kalbini kıran kazanır.", "Every castle guards a heart. Shatter the enemy heart to win.")),
             ("building.columns.fill", p("Kaleni kendin kur: kalbi duvarların, kulelerin arkasına sakla.", "Build your own castle: hide the heart behind walls and towers.")),
+            ("flame.fill", p("Fetih Yolu'nda kalen düşene kadar sırayla kaleler gelir. Başarımlar ve kalp türleri seni bekliyor.", "In the Gauntlet, castles keep coming until yours falls. Achievements and heart types wait for you.")),
             ("shield.lefthalf.filled", p("Sundurma kalbi yukarıdan korur, demir duvar iki darbe alır, hendek gülleyi yutar. Sahte kalplerle rakibi şaşırt.", "A shelter roofs the heart, iron walls take two blasts, moats swallow shots. Decoy hearts fool the enemy.")),
         ]
     }
@@ -347,4 +348,104 @@ enum Tx {
     static var opponentFound: String { p("Rakip bulundu, oyun başlıyor…", "Opponent found. Starting…") }
     static var versionMismatch: String { p("Rakip oyunun farklı bir sürümünde. İkiniz de güncelleyin.", "Your opponent has a different version of the game. Both of you should update.") }
     static var connectionLost: String { p("Bağlantı koptu.", "Connection lost.") }
+
+    // MARK: Heart types
+    static var heartType: String { p("Kalp türü", "Heart type") }
+    static func heart(_ h: HeartKind) -> String {
+        switch h {
+        case .crystal: return p("Kristal", "Crystal")
+        case .living: return p("Canlı", "Living")
+        case .aegis: return p("Kalkanlı", "Aegis")
+        case .titan: return p("Dev", "Titan")
+        }
+    }
+    static func heartInfo(_ h: HeartKind) -> String {
+        switch h {
+        case .crystal: return p("Sade kalp. Bedava.", "The plain heart. Free.")
+        case .living: return p("Her turunun başında kayıp bir kristali geri büyütür.", "Grows back one lost crystal at the start of each of your turns.")
+        case .aegis: return p("İlk çatladığında kaleni bir kez kalkanla korur.", "Throws a shield over your castle the first time it cracks.")
+        case .titan: return p("Dört sıra kristal: kırmak daha zor, ama daha yüksek.", "Four courses of crystal: harder to break, but taller.")
+        }
+    }
+    static func heartLocked(_ level: Int) -> String { p("Seviye \(level) gerekir", "Needs level \(level)") }
+    static func heartUnlocked(_ name: String) -> String { p("Yeni kalp: \(name)", "New heart: \(name)") }
+    static var heartRegrew: String { p("Kalp yeniden büyüdü", "The heart grew back") }
+    static var aegisUp: String { p("Kalkanlı kalp: kalkan açıldı!", "Aegis heart: shield up!") }
+
+    // MARK: Gauntlet
+    static var gauntlet: String { p("Fetih Yolu", "Gauntlet") }
+    static var gauntletPitch: String { p("Kalen düşene kadar sıradaki kale", "Castle after castle until yours falls") }
+    static func gauntletBest(_ n: Int) -> String { p("En iyi: \(n)", "Best: \(n)") }
+    static func gauntletRound(_ n: Int) -> String { p("\(n). kale", "Castle \(n)") }
+    static func gauntletWon(_ n: Int) -> String { p("\(n). kale düştü!", "Castle \(n) toppled!") }
+    static func gauntletCarry(_ n: Int) -> String {
+        p("Hasarın sonraki kaleye taşınır. \(n) taş onarıldı.", "Your damage carries into the next fight. \(n) stones repaired.")
+    }
+    static var gauntletOver: String { p("Seferin sonu", "Run over") }
+    static func gauntletToppled(_ n: Int) -> String { p("Bu seferde \(n) kale yıktın.", "You toppled \(n) castles this run.") }
+    static var nextCastle: String { p("Sıradaki kale", "Next castle") }
+    static var newRun: String { p("Yeni sefer", "New run") }
+    static var gauntletNewBest: String { p("En uzun seferin!", "Your best run yet!") }
+
+    // MARK: Castle codes
+    static var shareCastle: String { p("Paylaş", "Share") }
+    static var pasteCode: String { p("Kod yapıştır", "Paste code") }
+    static var codeLoaded: String { p("Kale koddan yüklendi", "Castle loaded from code") }
+    static var codeInvalid: String { p("Geçerli bir kale kodu bulunamadı", "No valid castle code found") }
+    static var friendCastle: String { p("Arkadaşının kalesi", "Friend's castle") }
+    static var friendHint: String { p("Kodunu yapıştır", "Paste their code") }
+    static var friendName: String { p("Arkadaş", "Friend") }
+    static func shareMessage(_ code: String) -> String {
+        p("Kalbimi kırabilir misin? Kale Savaşı'nda bu kodu yapıştır: \(code)", "Can you break my heart? Paste this code in Castle War: \(code)")
+    }
+
+    // MARK: Achievements
+    static var achievementsTitle: String { p("Başarımlar", "Achievements") }
+    static func achievementCount(_ n: Int, _ of: Int) -> String { p("Başarımlar \(n)/\(of)", "Achievements \(n)/\(of)") }
+    static func achievementDone(_ a: Achievement) -> String { p("Başarım: \(achievement(a))", "Achievement: \(achievement(a))") }
+    static func achievement(_ a: Achievement) -> String {
+        switch a {
+        case .firstWin: return p("İlk zafer", "First victory")
+        case .tenWins: return p("Kalp kırıcı", "Heartbreaker")
+        case .sniper: return p("Keskin nişancı", "Sharpshooter")
+        case .mega: return p("Gürleyen top", "Thunder cannon")
+        case .flawless: return p("Kusursuz", "Flawless")
+        case .comeback: return p("Küllerinden", "From the ashes")
+        case .trickster: return p("Hilekâr", "Trickster")
+        case .gauntlet5: return p("Kale avcısı", "Castle hunter")
+        case .gauntlet10: return p("Durdurulamaz", "Unstoppable")
+        case .campaign: return p("Seferin sonu", "Campaign conqueror")
+        case .allStars: return p("Yıldızlar", "Star collector")
+        case .siege: return p("Kuşatma ustası", "Siege master")
+        case .streak: return p("Seri katil", "On a roll")
+        case .level10: return p("Usta topçu", "Master gunner")
+        case .architect: return p("Mimar", "Architect")
+        case .friend: return p("Dost kazığı", "Friendly fire")
+        case .legend: return p("Efsane", "Legend")
+        }
+    }
+    static func achievementGoal(_ a: Achievement) -> String {
+        switch a {
+        case .firstWin: return p("Bir maç kazan", "Win a match")
+        case .tenWins: return p("10 maç kazan", "Win 10 matches")
+        case .sniper: return p("25 kritik vuruş yap", "Land 25 critical hits")
+        case .mega: return p("10 mega atış yap", "Fire 10 mega shots")
+        case .flawless: return p("Kalbin hiç çatlamadan kazan", "Win without a crack in your heart")
+        case .comeback: return p("Kalenin %30'u kalmışken kazan", "Win with under 30% of your castle standing")
+        case .trickster: return p("Rakip 3 sahte kalbini kırsın", "Let the enemy break 3 of your decoys")
+        case .gauntlet5: return p("Bir seferde 5 kale yık", "Topple 5 castles in one gauntlet run")
+        case .gauntlet10: return p("Bir seferde 10 kale yık", "Topple 10 castles in one gauntlet run")
+        case .campaign: return p("Seferin son bölümünü geç", "Clear the last campaign stage")
+        case .allStars: return p("Seferin tüm yıldızlarını topla", "Collect every campaign star")
+        case .siege: return p("Günün kuşatmasında 1500 puan yap", "Score 1500 in a daily siege")
+        case .streak: return p("Üst üste 5 maç kazan", "Win 5 matches in a row")
+        case .level10: return p("10. seviyeye ulaş", "Reach level 10")
+        case .architect: return p("Kendi kaleni kaydet", "Save a castle of your own")
+        case .friend: return p("Bir arkadaşının kalesini yık", "Break a friend's castle")
+        case .legend: return p("Efsane ligine çık", "Reach the Legend league")
+        }
+    }
+
+    // MARK: Final shot
+    static var finalShot: String { p("SON ATIŞ", "FINAL SHOT") }
 }

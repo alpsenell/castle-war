@@ -203,6 +203,26 @@ struct MenuView: View {
                         }
                         .buttonStyle(ChunkyButton(color: Paint.ink, dark: .black, fg: Paint.yellow, size: 15, compact: p.siegeToday() != nil))
                     }
+                    HStack(spacing: 10) {
+                        Button { game.playGauntlet() } label: {
+                            ModeLabel(icon: "flame.fill", title: Tx.gauntlet, detail: p.gauntletBest > 0 ? Tx.gauntletBest(p.gauntletBest) : Tx.gauntletPitch)
+                        }
+                        .buttonStyle(ChunkyButton(color: Color(hex: 0xe0611a), dark: Color(hex: 0x9c3f0c), size: 15, compact: true))
+                        HStack(spacing: 6) {
+                            ModeLabel(icon: "person.2.fill", title: Tx.friendCastle, detail: Tx.friendHint)
+                                .font(Paint.text(13, .heavy)).foregroundStyle(Paint.ink)
+                                .lineLimit(1).minimumScaleFactor(0.7)
+                            PasteButton(payloadType: String.self) { strings in
+                                DispatchQueue.main.async { game.playFriend(code: strings.first ?? "") }
+                            }
+                            .labelStyle(.iconOnly)
+                            .buttonBorderShape(.capsule)
+                            .tint(Paint.ink)
+                        }
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(RoundedRectangle(cornerRadius: 12).fill(Paint.track.opacity(0.6)))
+                        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Paint.ink, lineWidth: 2))
+                    }
                 }
             }
         }
@@ -310,6 +330,10 @@ struct ProfileView: View {
                         }
                     }
                 }
+                Button { game.panel = .achievements } label: {
+                    Label(Tx.achievementCount(Achievement.allCases.filter { p.has($0) }.count, Achievement.allCases.count), systemImage: "rosette")
+                }
+                .buttonStyle(ChunkyButton(color: Paint.yellow, dark: Paint.yellowDark, fg: Paint.ink, size: 14, compact: true))
             }
         }
     }
@@ -353,17 +377,57 @@ struct HowToView: View {
         Card {
             VStack(alignment: .leading, spacing: 10) {
                 PanelHeader(title: Tx.howToPlay) { game.closeHowTo() }
-                LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible())], alignment: .leading, spacing: 9) {
-                    ForEach(Array(Tx.tips.enumerated()), id: \.offset) { _, tip in
-                        HStack(alignment: .top, spacing: 8) {
-                            Image(systemName: tip.0).font(.system(size: 15, weight: .bold)).foregroundStyle(Paint.blue).frame(width: 22)
-                            Text(tip.1).font(Paint.text(12.5, .medium)).foregroundStyle(Paint.ink).fixedSize(horizontal: false, vertical: true)
+                ScrollView {
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible())], alignment: .leading, spacing: 9) {
+                        ForEach(Array(Tx.tips.enumerated()), id: \.offset) { _, tip in
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: tip.0).font(.system(size: 15, weight: .bold)).foregroundStyle(Paint.blue).frame(width: 22)
+                                Text(tip.1).font(Paint.text(12.5, .medium)).foregroundStyle(Paint.ink).fixedSize(horizontal: false, vertical: true)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
+                .frame(maxHeight: 230)
                 Button(Tx.gotIt) { game.closeHowTo() }
                     .buttonStyle(ChunkyButton(color: Paint.red, dark: Paint.redDark, size: 16, fill: false))
+            }
+        }
+    }
+}
+
+struct AchievementsView: View {
+    @EnvironmentObject var game: GameController
+    var body: some View {
+        let p = game.profile
+        Card {
+            VStack(alignment: .leading, spacing: 10) {
+                PanelHeader(title: Tx.achievementsTitle) { game.panel = .profile }
+                ScrollView {
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8), GridItem(.flexible())], spacing: 8) {
+                        ForEach(Achievement.allCases) { a in
+                            let done = p.has(a), v = min(a.value(p), a.target)
+                            HStack(spacing: 8) {
+                                Image(systemName: a.icon).font(.system(size: 15, weight: .bold))
+                                    .foregroundStyle(done ? Paint.ink : Paint.muted)
+                                    .frame(width: 32, height: 32)
+                                    .background(Circle().fill(done ? Paint.yellow : Paint.track))
+                                    .overlay(Circle().strokeBorder(Paint.ink, lineWidth: done ? 2 : 1))
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(Tx.achievement(a)).font(Paint.text(12, .heavy)).foregroundStyle(Paint.ink).lineLimit(1).minimumScaleFactor(0.75)
+                                    Text(Tx.achievementGoal(a)).font(Paint.text(10, .semibold)).foregroundStyle(Paint.muted).lineLimit(2).minimumScaleFactor(0.8)
+                                    if !done && a.target > 1 { Meter(value: Double(v) / Double(a.target), color: Paint.blue, height: 4) }
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .padding(7)
+                            .background(RoundedRectangle(cornerRadius: 10).fill(done ? Paint.yellow.opacity(0.3) : Paint.track.opacity(0.5)))
+                            .accessibilityElement(children: .combine)
+                            .accessibilityValue(done ? Tx.achievementDone(a) : "\(v)/\(a.target)")
+                        }
+                    }
+                }
+                .frame(maxHeight: 270)
             }
         }
     }
@@ -562,6 +626,26 @@ struct BuilderView: View {
                         .frame(width: 38, height: 34).modifier(Plate(radius: 10))
                 }
                 .accessibilityLabel(Tx.close)
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text(Tx.heartType).font(Paint.text(11, .heavy)).foregroundStyle(.white)
+                    HStack(spacing: 5) {
+                        ForEach(HeartKind.allCases) { h in heartButton(h) }
+                    }
+                }
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 12).fill(Paint.ink.opacity(0.7)))
+                HStack(spacing: 8) {
+                    if let code = game.draftCode {
+                        ShareLink(item: Tx.shareMessage(code)) { Label(Tx.shareCastle, systemImage: "square.and.arrow.up") }
+                            .buttonStyle(ChunkyButton(color: .white, dark: Paint.ink, fg: Paint.ink, size: 13, fill: false, compact: true))
+                    }
+                    PasteButton(payloadType: String.self) { strings in
+                        DispatchQueue.main.async { game.pasteCastle(strings.first ?? "") }
+                    }
+                    .labelStyle(.titleAndIcon)
+                    .buttonBorderShape(.capsule)
+                    .tint(Paint.ink)
+                }
                 Spacer()
                 Text(game.builderNote ?? toolLine).font(Paint.text(13, .heavy)).foregroundStyle(.white).multilineTextAlignment(.trailing)
                     .padding(.horizontal, 12).padding(.vertical, 7)
@@ -585,6 +669,23 @@ struct BuilderView: View {
         guard let k = game.tool else { return Tx.builderHint }
         let line = "\(Tx.piece(k)) · \(CastleDesign.cost(of: k))"
         return Tx.pieceInfo(k).map { line + "\n" + $0 } ?? line
+    }
+
+    private func heartButton(_ h: HeartKind) -> some View {
+        let owned = game.profile.owns(h), on = game.draft.heart == h
+        return Button { game.pick(heart: h) } label: {
+            ZStack {
+                Image(systemName: "heart.fill").font(.system(size: 15, weight: .black)).foregroundStyle(Color(hex: Look.heartColors(h).glow))
+                if !owned { Image(systemName: "lock.fill").font(.system(size: 8, weight: .black)).foregroundStyle(.white) }
+            }
+            .frame(width: 34, height: 30)
+            .background(RoundedRectangle(cornerRadius: 8).fill(on ? Paint.yellow : .white.opacity(0.85)))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Paint.ink, lineWidth: on ? 2.5 : 1))
+            .opacity(owned ? 1 : 0.6)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(Tx.heart(h))\(owned ? "" : ", " + Tx.heartLocked(h.level))")
+        .accessibilityAddTraits(on ? .isSelected : [])
     }
 
     private func toolButton(_ k: PieceKind) -> some View {
@@ -672,11 +773,13 @@ struct RewardPanel: View {
     }
 
     private var notes: [String] {
-        var out: [String] = []
+        var out: [String] = reward.achievements.map(Tx.achievementDone)
+        if reward.gauntletNewBest { out.append(Tx.gauntletNewBest) }
         if let k = reward.unlockedPiece { out.append(Tx.pieceUnlocked(Tx.piece(k))) }
         if reward.levelAfter > reward.levelBefore {
             var line = Tx.levelUp(reward.levelAfter)
             if let b = reward.unlockedBall { line += " · " + Tx.unlocked(Tx.ball(b)) }
+            if let h = HeartKind.allCases.last(where: { $0.level > reward.levelBefore && $0.level <= reward.levelAfter }) { line += " · " + Tx.heartUnlocked(Tx.heart(h)) }
             out.append(line)
         }
         if let l = reward.promotedTo { out.append(Tx.promoted(Tx.league(l))) }
@@ -764,6 +867,7 @@ struct OverView: View {
     private func again(_ o: OverInfo?) -> String {
         if o?.waiting == true { return Tx.waitingOpponent }
         if o?.hasNextStage == true { return Tx.nextStage }
+        if o?.isGauntlet == true { return o?.gauntletNext == true ? Tx.nextCastle : Tx.newRun }
         return o?.isSiege == true ? Tx.tryAgain : Tx.playAgain
     }
 }
