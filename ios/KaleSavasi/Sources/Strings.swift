@@ -28,7 +28,7 @@ enum Tx {
     static var gameName: String { p("Kale Savaşı", "Castle War") }
     static var logoTop: String { p("KALE", "CASTLE") }
     static var logoBottom: String { p("SAVAŞI", "WAR") }
-    static var tagline: String { p("Sırayla ateş et, rakip kaleyi taş taş yık. %20'nin altına düşen kaybeder.", "Take turns firing and bring the enemy castle down stone by stone. Drop below 20% and you lose.") }
+    static var tagline: String { p("Sırayla ateş et, duvarları aş ve rakibin kalbini kır. Kalbi düşen kaybeder.", "Take turns firing, break through the walls and shatter the enemy heart. Lose your heart and you lose.") }
     static var vsComputer: String { p("Yapay zekâya karşı", "Play the computer") }
     static var difficulty: String { p("Zorluk", "Difficulty") }
     static func name(_ d: Difficulty) -> String {
@@ -74,7 +74,9 @@ enum Tx {
     static var mute: String { p("Sesi kapat", "Mute") }
     static var unmute: String { p("Sesi aç", "Unmute") }
     static var mainMenu: String { p("Ana menü", "Main menu") }
-    static func health(_ name: String, _ n: Int) -> String { p("\(name), kalan yapı yüzde \(n)", "\(name), \(n) percent standing") }
+    static func health(_ name: String, _ heart: Int, _ n: Int) -> String {
+        p("\(name), kalp yüzde \(heart), kalan yapı yüzde \(n)", "\(name), heart \(heart) percent, \(n) percent standing")
+    }
     static var megaReady: String { p("Mega atış hazır", "Mega shot ready") }
     static var megaCharging: String { p("Mega atış doluyor", "Mega shot charging") }
 
@@ -86,6 +88,9 @@ enum Tx {
     static func megaHit(_ n: Int) -> String { p("Mega atış! −%\(n)", "Mega shot! −\(n)%") }
     static func streak(_ n: Int) -> String { p("Seri ×\(n)", "Streak ×\(n)") }
     static var ownCastle: String { p("Kendi kaleni vurdun!", "You hit your own castle!") }
+    static var heartHit: String { p("Kalp çatladı!", "Heart cracked!") }
+    static var heartBroken: String { p("Kalp kırıldı!", "Heart shattered!") }
+    static var ownHeart: String { p("Kendi kalbini vurdun!", "You hit your own heart!") }
     static var timeUp: String { p("Süre doldu", "Time's up") }
 
     // MARK: Result card
@@ -95,6 +100,7 @@ enum Tx {
     static func standing(_ a: String, _ pa: Int, _ b: String, _ pb: Int) -> String {
         p("Ayakta kalan yapı: \(a) \(pct(pa)), \(b) \(pct(pb)).", "Still standing: \(a) \(pct(pa)), \(b) \(pct(pb)).")
     }
+    static func heartFell(_ name: String) -> String { p("\(name) kalbini kaybetti.", "\(name) lost their heart.") }
     static var forfeitWin: String { p("Rakip ayrıldı, maç senin.", "Your opponent left. The match is yours.") }
     static var rematchWanted: String { p("Rakip tekrar oynamak istiyor.", "Your opponent wants a rematch.") }
     static var rematchGone: String { p("Rakip ayrıldı. Ana menüden yeni bir eşleşme başlat.", "Your opponent left. Start a new match from the main menu.") }
@@ -148,9 +154,9 @@ enum Tx {
     static var score: String { p("Skor", "Score") }
     static func points(_ n: Int) -> String { p("+\(n) puan", "+\(n) pts") }
     static var siegeOver: String { p("Kuşatma bitti", "Siege over") }
-    static var siegeCleared: String { p("Kale düştü!", "Castle destroyed!") }
+    static var siegeCleared: String { p("Kalp kırıldı!", "Heart shattered!") }
     static func siegeScore(_ n: Int) -> String { p("Skorun: \(n)", "Your score: \(n)") }
-    static func clearBonus(_ n: Int) -> String { p("Kale bonusu +\(n)", "Clear bonus +\(n)") }
+    static func clearBonus(_ n: Int) -> String { p("Kalp bonusu +\(n)", "Heart bonus +\(n)") }
     static var todayBest: String { p("Bugünkü en iyi", "Today's best") }
     static var record: String { p("Rekor", "Record") }
     static var newBest: String { p("Bugünün en iyi skoru!", "New best for today!") }
@@ -251,6 +257,7 @@ enum Tx {
         case .tallTower: return p("Yüksek kule", "Tall tower")
         case .bastion: return p("Tabya", "Bastion")
         case .keep: return p("İç kale", "Keep")
+        case .heart: return p("Kalp", "Heart")
         }
     }
     static var eraser: String { p("Sil", "Erase") }
@@ -260,12 +267,13 @@ enum Tx {
     static var clearAll: String { p("Temizle", "Clear") }
     static var builderFront: String { p("ÖN (düşmana bakan)", "FRONT (faces the enemy)") }
     static var builderBack: String { p("ARKA", "BACK") }
-    static var builderHint: String { p("Parça seç, ızgaraya dokun. Sahneyi sürükleyerek çevir.", "Pick a piece, tap the grid. Drag the scene to turn it.") }
+    static var builderHint: String { p("Parça seç, ızgaraya dokun. Kalbi duvarların arkasına sakla.", "Pick a piece, tap the grid. Hide the heart behind your walls.") }
     static var saved: String { p("Kalen kaydedildi", "Castle saved") }
     static func needStars(_ n: Int) -> String { p("\(n) sefer yıldızı gerekir", "Needs \(n) campaign stars") }
     static func problem(_ pr: CastleDesign.Problem) -> String {
         switch pr {
-        case .noKeep: return p("Bir iç kale yerleştirmelisin.", "Place a keep first.")
+        case .noHeart: return p("Kalbi yerleştir: korunacak tek şey o.", "Place the heart: it is what you defend.")
+        case .manyHearts: return p("Yalnızca bir kalp olabilir.", "Only one heart is allowed.")
         case .manyKeeps: return p("Yalnızca bir iç kale olabilir.", "Only one keep is allowed.")
         case .tooSmall: return p("Kale çok küçük: en az \(CastleDesign.minimum) taş kullan.", "Too small: use at least \(CastleDesign.minimum) stone.")
         case .overBudget: return p("Taş sınırı aşıldı.", "Over the stone limit.")
@@ -291,7 +299,8 @@ enum Tx {
             ("bolt.fill", p("Hasar verdikçe MEGA dolar. Dolunca düğmeye bas, dev bir atış yap.", "Dealing damage fills MEGA. When it is full, tap the button for a giant shot.")),
             ("circle.grid.cross.fill", p("Her maçta üç özel güllen var: Saçma, Delici, Güdümlü.", "You carry three special shots per match: Cluster, Piercer, Homing.")),
             ("balloon.fill", p("Balonun içinden atış geçirirsen ödülü kaparsın: onarım, kalkan ya da mega şarj.", "Shoot through a balloon to grab its prize: repair, shield or mega charge.")),
-            ("building.columns.fill", p("Kaleni kendin kur. Kalesi %20'nin altına düşen kaybeder.", "Build your own castle. Whoever drops below 20% loses.")),
+            ("heart.fill", p("Her kalenin bir kalbi var. Rakibin kalbini kıran kazanır.", "Every castle guards a heart. Shatter the enemy heart to win.")),
+            ("building.columns.fill", p("Kaleni kendin kur: kalbi duvarların, kulelerin arkasına sakla.", "Build your own castle: hide the heart behind walls and towers.")),
         ]
     }
     static var quitTitle: String { p("Maçtan çıkılsın mı?", "Leave the match?") }
@@ -317,5 +326,6 @@ enum Tx {
     static var nearbySearching: String { p("Yakındaki oyuncu aranıyor. Diğer cihazda da bu ekranı aç.", "Looking for a nearby player. Open this screen on the other device too.") }
     static func localNetworkFailed(_ reason: String) -> String { p("Yerel ağa erişilemedi: ", "Could not reach the local network: ") + reason }
     static var opponentFound: String { p("Rakip bulundu, oyun başlıyor…", "Opponent found. Starting…") }
+    static var versionMismatch: String { p("Rakip oyunun farklı bir sürümünde. İkiniz de güncelleyin.", "Your opponent has a different version of the game. Both of you should update.") }
     static var connectionLost: String { p("Bağlantı koptu.", "Connection lost.") }
 }

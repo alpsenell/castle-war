@@ -1,7 +1,7 @@
 # Kale Savaşı
 
-A two-player castle battle. Players take turns firing a cannon at each other's castle; the
-castle that drops below 20 % of its structure loses. Play against the computer, on one device,
+A two-player castle battle. Each player builds a castle around a glowing heart, then the two
+take turns firing a cannon at each other; the first heart to shatter loses. Play against the computer, on one device,
 or online.
 
 - [`ios/KaleSavasi`](ios/KaleSavasi) is the game: a native iOS app in Swift (SceneKit and

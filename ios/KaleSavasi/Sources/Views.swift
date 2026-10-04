@@ -20,6 +20,7 @@ enum Paint {
     static let blue = Color(hex: 0x1f5fc4), blueDark = Color(hex: 0x143f85)
     static let yellow = Color(hex: 0xf2cd37), yellowDark = Color(hex: 0xc49a0c)
     static let green = Color(hex: 0x2f9e55)
+    static let heart = Color(hex: 0xd8246e)
     static func team(_ side: Int) -> Color { side == 0 ? red : blue }
     static func heavy(_ size: CGFloat) -> Font { .system(size: size, weight: .heavy, design: .rounded) }
     static func text(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font { .system(size: size, weight: weight, design: .rounded) }
@@ -168,12 +169,14 @@ struct ChargeRow: View {
 struct HealthPlate: View {
     let name: String
     let pct: Double
+    let heart: Double
     let color: Color
     let charge: Double
     let streak: Int
     let shielded: Bool
     var body: some View {
         let whole = Int((pct * 100 + 1e-9).rounded(.down))
+        let core = Int((heart * 100 + 1e-9).rounded(.up))
         VStack(spacing: 4) {
             HStack(alignment: .firstTextBaseline, spacing: 5) {
                 Text(name).font(Paint.heavy(16)).foregroundStyle(color).lineLimit(1)
@@ -182,13 +185,15 @@ struct HealthPlate: View {
                         .accessibilityLabel(Tx.pickup(.shield))
                 }
                 Spacer(minLength: 8)
-                Text(Tx.pct(whole)).font(Paint.heavy(19)).monospacedDigit().foregroundStyle(Paint.ink)
+                Label(Tx.pct(whole), systemImage: "building.columns.fill").font(Paint.text(11, .heavy)).monospacedDigit().foregroundStyle(Paint.muted)
+                Label(Tx.pct(core), systemImage: heart > 0 ? "heart.fill" : "heart.slash.fill")
+                    .font(Paint.heavy(17)).monospacedDigit().foregroundStyle(Paint.heart)
             }
             GeometryReader { g in
                 ZStack(alignment: .leading) {
                     Capsule().fill(Paint.track)
-                    Capsule().fill(color).frame(width: max(0, g.size.width * pct))
-                    Rectangle().fill(Paint.yellow).frame(width: 3).offset(x: g.size.width * 0.2)   // the 20 % line
+                    Capsule().fill(color.opacity(0.35)).frame(width: max(0, g.size.width * pct))
+                    Capsule().fill(Paint.heart).frame(width: max(0, g.size.width * heart)).frame(height: 6)
                 }
                 .clipShape(Capsule())
                 .overlay(Capsule().strokeBorder(Paint.ink, lineWidth: 2))
@@ -200,9 +205,10 @@ struct HealthPlate: View {
         .frame(width: 216)
         .modifier(Plate())
         .animation(.easeOut(duration: 0.6), value: pct)
+        .animation(.easeOut(duration: 0.6), value: heart)
         .animation(.easeOut(duration: 0.6), value: charge)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Tx.health(name, whole))
+        .accessibilityLabel(Tx.health(name, core, whole))
     }
 }
 
@@ -341,7 +347,7 @@ struct HUDView: View {
                 if let score = h.score {
                     ScorePlate(score: score, taken: h.shotsTaken, charge: h.charge[0], streak: h.streak[0]).allowsHitTesting(false)
                 } else {
-                    HealthPlate(name: h.names[0], pct: h.pct[0], color: Paint.red, charge: h.charge[0], streak: h.streak[0], shielded: h.shield[0]).allowsHitTesting(false)
+                    HealthPlate(name: h.names[0], pct: h.pct[0], heart: h.heart[0], color: Paint.red, charge: h.charge[0], streak: h.streak[0], shielded: h.shield[0]).allowsHitTesting(false)
                 }
                 Spacer(minLength: 8)
                 VStack(spacing: 2) {
@@ -370,7 +376,7 @@ struct HUDView: View {
                 .allowsHitTesting(false)
                 .accessibilityElement(children: .combine)
                 Spacer(minLength: 8)
-                HealthPlate(name: h.names[1], pct: h.pct[1], color: Paint.blue, charge: h.charge[1], streak: h.streak[1], shielded: h.shield[1]).allowsHitTesting(false)
+                HealthPlate(name: h.names[1], pct: h.pct[1], heart: h.heart[1], color: Paint.blue, charge: h.charge[1], streak: h.streak[1], shielded: h.shield[1]).allowsHitTesting(false)
             }
             HStack(spacing: 10) {
                 Spacer()

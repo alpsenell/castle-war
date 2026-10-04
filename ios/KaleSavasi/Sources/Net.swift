@@ -25,6 +25,8 @@ struct NetMessage: Codable {
     var design: [Int]? = nil
     /// Special shot used, as `Ammo.rawValue`.
     var ammo: Int? = nil
+    /// Sent with "hello": the sender's `K.rulesVersion`. Missing means an older build.
+    var rules: Int? = nil
 }
 
 /// A two-player connection. All callbacks arrive on the main queue.

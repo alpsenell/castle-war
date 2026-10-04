@@ -438,6 +438,7 @@ enum PieceLook {
         case .tallTower: return Color(hex: 0x2459b8)
         case .bastion: return Color(hex: 0x9a7b52)
         case .keep: return Color(hex: 0xc62d1f)
+        case .heart: return Paint.heart
         }
     }
     static func icon(_ k: PieceKind) -> String {
@@ -448,6 +449,7 @@ enum PieceLook {
         case .tallTower: return "building.2.fill"
         case .bastion: return "square.fill"
         case .keep: return "crown.fill"
+        case .heart: return "heart.fill"
         }
     }
 }
@@ -473,7 +475,11 @@ struct DesignGrid: View {
                 let rect = CGRect(x: CGFloat(piece.tz) * cell, y: CGFloat(rows - piece.tx - n) * cell, width: CGFloat(n) * cell, height: CGFloat(n) * cell).insetBy(dx: 1, dy: 1)
                 ctx.fill(Path(roundedRect: rect, cornerRadius: n == 1 ? 3 : 5), with: .color(PieceLook.color(piece.kind)))
                 ctx.stroke(Path(roundedRect: rect, cornerRadius: n == 1 ? 3 : 5), with: .color(Paint.ink), lineWidth: 1.5)
-                if n > 1 {
+                if piece.kind == .heart {
+                    var mark = ctx.resolve(Image(systemName: PieceLook.icon(piece.kind)))
+                    mark.shading = .color(.white)
+                    ctx.draw(mark, in: rect.insetBy(dx: rect.width * 0.18, dy: rect.height * 0.18))
+                } else if n > 1 {
                     let mark = ctx.resolve(Image(systemName: PieceLook.icon(piece.kind)))
                     ctx.draw(mark, in: rect.insetBy(dx: rect.width * 0.28, dy: rect.height * 0.28))
                 }
@@ -511,14 +517,14 @@ struct BuilderView: View {
                         .onEnded { _ in game.strokeEnded() })
                     .accessibilityLabel(Tx.buildCastle)
                 Text(Tx.builderBack).font(Paint.text(9, .heavy)).foregroundStyle(Paint.muted).frame(maxWidth: .infinity)
-                HStack(spacing: 5) {
+                HStack(spacing: 4) {
                     ForEach(PieceKind.allCases) { k in toolButton(k) }
                     Button { game.pick(tool: nil) } label: {
                         VStack(spacing: 1) {
                             Image(systemName: "eraser.fill").font(.system(size: 13, weight: .bold))
                             Text(Tx.eraser).font(Paint.text(8, .heavy))
                         }
-                        .foregroundStyle(Paint.ink).frame(width: 38, height: 36)
+                        .foregroundStyle(Paint.ink).frame(width: 34, height: 36)
                         .background(RoundedRectangle(cornerRadius: 8).fill(game.erasing ? Paint.yellow : Paint.track.opacity(0.7)))
                         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Paint.ink, lineWidth: game.erasing ? 2.5 : 1))
                     }
@@ -567,11 +573,12 @@ struct BuilderView: View {
                 ZStack {
                     RoundedRectangle(cornerRadius: 3).fill(PieceLook.color(k)).frame(width: 18, height: 14)
                         .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Paint.ink, lineWidth: 1))
+                    if k == .heart { Image(systemName: "heart.fill").font(.system(size: 8, weight: .black)).foregroundStyle(.white) }
                     if !owned { Image(systemName: "lock.fill").font(.system(size: 8, weight: .black)).foregroundStyle(.white) }
                 }
                 Text("\(CastleDesign.cost(of: k))").font(Paint.text(9, .heavy)).monospacedDigit()
             }
-            .foregroundStyle(Paint.ink).frame(width: 38, height: 36)
+            .foregroundStyle(Paint.ink).frame(width: 34, height: 36)
             .background(RoundedRectangle(cornerRadius: 8).fill(on ? Paint.yellow : Paint.track.opacity(0.7)))
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Paint.ink, lineWidth: on ? 2.5 : 1))
             .opacity(owned ? 1 : 0.55)

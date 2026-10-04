@@ -79,9 +79,26 @@ enum Look {
         return m
     }
 
-    /// A castle's mesh materials: three stone shades, team colour, trim.
+    static let heartGlow: UInt32 = 0xff2f7d
+
+    /// Glowing crystal for the heart, pulsing slowly.
+    static func heartMaterial() -> SCNMaterial {
+        let m = solid(0xc2185b, roughness: 0.18, metal: 0.2)
+        m.emission.contents = UIColor(hex: heartGlow)
+        m.emission.intensity = 0.7
+        let pulse = CABasicAnimation(keyPath: "intensity")
+        pulse.fromValue = 0.45
+        pulse.toValue = 1.1
+        pulse.duration = 0.9
+        pulse.autoreverses = true
+        pulse.repeatCount = .infinity
+        m.emission.addAnimation(pulse, forKey: "pulse")
+        return m
+    }
+
+    /// A castle's mesh materials: three stone shades, team colour, trim, heart.
     static func castleMaterials(_ side: Int) -> [SCNMaterial] {
-        stone[side].map(stoneMaterial) + [stoneMaterial(accent[side]), stoneMaterial(trim[side])]
+        stone[side].map(stoneMaterial) + [stoneMaterial(accent[side]), stoneMaterial(trim[side]), heartMaterial()]
     }
 }
 
@@ -96,25 +113,56 @@ struct MeshBuilder {
 
     init(materials: Int) { idx = Array(repeating: [], count: materials) }
 
-    mutating func addBox(center c: SIMD3<Float>, size: SIMD3<Float>, material: Int, texel: Float = 0.3) {
+    /// A box whose edges and corners are cut at 45°. Each bevel takes its normals from the two faces
+    /// it joins, so the light rolls over it like a worn, rounded stone.
+    mutating func addBox(center c: SIMD3<Float>, size: SIMD3<Float>, material: Int, bevel: Float = 0, texel: Float = 0.3) {
         let h = size / 2
+        let b = min(bevel, min(h.x, min(h.y, h.z)) * 0.45)
+        let e = h - b
         // normal, tangent u, bitangent v with u × v = normal
         let faces: [(SIMD3<Float>, SIMD3<Float>, SIMD3<Float>)] = [
             (SIMD3(1, 0, 0), SIMD3(0, 1, 0), SIMD3(0, 0, 1)), (SIMD3(-1, 0, 0), SIMD3(0, 0, 1), SIMD3(0, 1, 0)),
             (SIMD3(0, 1, 0), SIMD3(0, 0, 1), SIMD3(1, 0, 0)), (SIMD3(0, -1, 0), SIMD3(1, 0, 0), SIMD3(0, 0, 1)),
             (SIMD3(0, 0, 1), SIMD3(1, 0, 0), SIMD3(0, 1, 0)), (SIMD3(0, 0, -1), SIMD3(0, 1, 0), SIMD3(1, 0, 0)),
         ]
-        for (n, u, v) in faces {
-            let base = Int32(pos.count)
-            let o = c + n * h, du = u * h, dv = v * h
-            for p in [o - du - dv, o + du - dv, o + du + dv, o - du + dv] {
+        func key(_ f: Int, _ s: SIMD3<Float>) -> Int { f * 8 + (s.x > 0 ? 1 : 0) + (s.y > 0 ? 2 : 0) + (s.z > 0 ? 4 : 0) }
+        func faceOf(_ n: SIMD3<Float>) -> Int { n.x != 0 ? (n.x > 0 ? 0 : 1) : n.y != 0 ? (n.y > 0 ? 2 : 3) : (n.z > 0 ? 4 : 5) }
+        var vid: [Int: Int32] = [:]
+        var at: [Int32: SIMD3<Float>] = [:]
+        for (f, (n, u, v)) in faces.enumerated() {
+            for s in [n - u - v, n + u - v, n + u + v, n - u + v] {
+                let p = c + s * e + n * b
+                let i = Int32(pos.count)
                 pos.append(SCNVector3(p.x, p.y, p.z))
                 nor.append(SCNVector3(n.x, n.y, n.z))
                 uv.append(CGPoint(x: CGFloat(simd_dot(p, u) * texel), y: CGFloat(simd_dot(p, v) * texel)))
                 tan.append(SIMD4(u.x, u.y, u.z, 1))
+                vid[key(f, s)] = i
+                at[i] = p
             }
-            idx[material].append(contentsOf: [base, base + 1, base + 2, base, base + 2, base + 3])
         }
+        func tri(_ a: Int32, _ b: Int32, _ d: Int32) {
+            guard let pa = at[a], let pb = at[b], let pd = at[d] else { return }
+            let out = simd_dot(simd_cross(pb - pa, pd - pa), (pa + pb + pd) / 3 - c)
+            idx[material].append(contentsOf: out >= 0 ? [a, b, d] : [a, d, b])
+        }
+        for (f, (n, u, v)) in faces.enumerated() {
+            let q = [n - u - v, n + u - v, n + u + v, n - u + v].map { vid[key(f, $0)]! }
+            tri(q[0], q[1], q[2]); tri(q[0], q[2], q[3])
+        }
+        guard b > 0 else { return }
+        for i in 0..<6 { for j in (i + 1)..<6 {
+            let na = faces[i].0, nb = faces[j].0
+            if simd_dot(na, nb) != 0 { continue }
+            let t = simd_cross(na, nb)
+            let a1 = vid[key(i, na + nb + t)]!, a2 = vid[key(i, na + nb - t)]!
+            let b1 = vid[key(j, na + nb + t)]!, b2 = vid[key(j, na + nb - t)]!
+            tri(a1, a2, b2); tri(a1, b2, b1)
+        } }
+        for sx in [Float(-1), 1] { for sy in [Float(-1), 1] { for sz in [Float(-1), 1] {
+            let s = SIMD3(sx, sy, sz)
+            tri(vid[key(faceOf(SIMD3(sx, 0, 0)), s)]!, vid[key(faceOf(SIMD3(0, sy, 0)), s)]!, vid[key(faceOf(SIMD3(0, 0, sz)), s)]!)
+        } } }
     }
 
     func geometry(materials: [SCNMaterial]) -> SCNGeometry {
@@ -153,8 +201,12 @@ final class CastleView {
     fileprivate var decor: [(node: SCNNode, ids: [Int], alive: Bool)] = []
     private var looseGeo: [Int: SCNGeometry] = [:]
     private let physics: Bool
-    /// The mortar joint: each block is drawn this much smaller so a dark seam shows between stones.
-    private let joint: Float = 0.05
+    /// The mortar joint: each block is drawn this much smaller so a seam shows between stones.
+    private let joint: Float = 0.03
+    /// How far each stone's edges are rounded off.
+    private let bevel: Float = 0.11
+    /// The floating gem and glow above the heart, until it breaks.
+    private(set) var heartNode: SCNNode?
 
     /// `physics` is off for the builder preview, where nothing ever falls.
     init(castle: Castle, physics: Bool = true) {
@@ -165,6 +217,7 @@ final class CastleView {
         colorOf = castle.blocks.map { b in
             if b.mat == 2 { return 3 }
             if b.mat == 3 { return 4 }
+            if b.mat == 4 { return 5 }
             let r = rnd.next()
             return r < 0.5 ? 0 : r < 0.8 ? 1 : 2
         }
@@ -195,7 +248,40 @@ final class CastleView {
             }
             decor.append((n, ids, true))
         }
+        if let c = castle.heartCenter { addHeartGem(at: c) }
         rebuildMesh()
+    }
+
+    private func addHeartGem(at c: Vec3) {
+        let n = SCNNode()
+        n.simdPosition = c.f + SIMD3(0, 3.1, 0)
+        let crystal = Look.heartMaterial()
+        for flip in [false, true] {
+            let half = SCNNode(geometry: SCNPyramid(width: 1.1, height: 1.0, length: 1.1))
+            half.geometry?.materials = [crystal]
+            if flip { half.eulerAngles.x = .pi }
+            n.addChildNode(half)
+        }
+        let light = SCNLight()
+        light.type = .omni
+        light.color = UIColor(hex: Look.heartGlow)
+        light.intensity = 900
+        light.attenuationStartDistance = 1
+        light.attenuationEndDistance = 9
+        n.light = light
+        n.runAction(.repeatForever(.rotateBy(x: 0, y: .pi * 2, z: 0, duration: 4)))
+        n.runAction(.repeatForever(.sequence([.moveBy(x: 0, y: 0.4, z: 0, duration: 1.1), .moveBy(x: 0, y: -0.4, z: 0, duration: 1.1)])))
+        root.addChildNode(n)
+        heartNode = n
+    }
+
+    /// Takes the gem down once the heart is gone. Returns where it was.
+    fileprivate func breakHeart() -> SIMD3<Float>? {
+        guard let n = heartNode else { return nil }
+        heartNode = nil
+        let p = n.presentation.simdWorldPosition
+        n.removeFromParentNode()
+        return p
     }
 
     private func addFixedBody(_ b: Block) {
@@ -215,7 +301,7 @@ final class CastleView {
         for b in castle.blocks where b.alive {
             let c = castle.center(of: b).f
             let size: SIMD3<Float> = b.dir == 1 ? SIMD3(Float(b.len), Float(K.lh), 1) : SIMD3(1, Float(K.lh), Float(b.len))
-            mb.addBox(center: c, size: size - SIMD3(repeating: joint), material: colorOf[b.id])
+            mb.addBox(center: c, size: size - SIMD3(repeating: joint), material: colorOf[b.id], bevel: bevel)
         }
         meshNode.geometry = mb.geometry(materials: materials)
     }
@@ -228,7 +314,8 @@ final class CastleView {
         let key = b.len * 10 + colorOf[id]
         let geo: SCNGeometry
         if let g = looseGeo[key] { geo = g } else {
-            let g = SCNBox(width: CGFloat(b.len) - 0.06, height: CGFloat(K.lh) - 0.06, length: 0.94, chamferRadius: 0.05)
+            let g = SCNBox(width: CGFloat(b.len) - 0.06, height: CGFloat(K.lh) - 0.06, length: 0.94, chamferRadius: CGFloat(bevel))
+            g.chamferSegmentCount = 3
             g.materials = [materials[colorOf[id]]]
             looseGeo[key] = g
             geo = g
@@ -652,6 +739,10 @@ final class World {
                 n.physicsBody = body
                 looseRoot.addChildNode(n)
                 loose.append((n, clock, true))
+            }
+            if view.castle.heartLost, let p = view.breakHeart() {
+                burst(at: p, colors: [Look.heartGlow, 0xffffff, 0xffb3d1], count: 160, speed: 22, life: 1.2, size: 0.9, accel: -9, cone: false, additive: true)
+                flash(at: p, strength: 5200)
             }
             view.rebuildMesh()
         }

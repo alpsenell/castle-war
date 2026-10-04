@@ -147,7 +147,7 @@ struct Profile: Codable, Equatable {
     }
 
     /// The castle the player takes into battle.
-    var castle: CastleDesign { CastleDesign(encoded: design) ?? .classic }
+    var castle: CastleDesign { CastleDesign.migrating(encoded: design) ?? .classic }
 
     var totalStars: Int { stars.reduce(0, +) }
     func stars(for stage: Stage) -> Int { stage.id - 1 < stars.count ? stars[stage.id - 1] : 0 }
