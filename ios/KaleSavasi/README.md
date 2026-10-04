@@ -37,6 +37,22 @@ The heart is tougher than stone: a blast only breaks heart crystal within half i
 reach, so it takes a well-placed shot, or a wall knocked out of the way first. The bar under
 each name shows the heart; the small number beside it is how much of the castle still stands.
 
+A shot that is going to break a heart plays out as the **final shot**: the camera swings to the
+side of the ball, time slows to 0.3×, cinema bars close in, and the blast lingers in slow
+motion before the result card.
+
+#### Heart types
+
+Picked in the builder; each one unlocks with player level and costs stone on top of the castle.
+Decoys take on the colour of the castle's heart type, so they still pass for the real one.
+
+| Heart | Level | Stone | Effect |
+| --- | --- | --- | --- |
+| Crystal | 1 | 0 | The plain heart. |
+| Living | 4 | 80 | At the start of each of its owner's turns, grows back one lost crystal block that has something to stand on. |
+| Aegis | 7 | 80 | The first time it cracks without breaking, throws the shield over its castle (once per match). |
+| Titan | 10 | 100 | Four courses of crystal instead of three: harder to break, but taller and easier to see. |
+
 ### Build your castle
 
 The castle you defend is your own design, and its job is to keep the heart out of reach. The
@@ -104,6 +120,34 @@ Three goals per day, the same for everyone, drawn from a pool of seven (win a ma
 or criticals, fire mega shots, deal 12 % with one shot, reach a streak, play the siege).
 Progress adds up across matches and the siege; each finished mission pays 40 XP.
 
+### Gauntlet
+
+Castle after castle until yours falls. Each round is a ready-made castle chosen from the run's
+seed; the computer is easy for castles 1–3, medium for 4–7 and hard after that. From castle 8
+the enemy brings a living heart, from castle 11 an aegis heart, and every third castle from
+the fourth adds a match twist. Damage to your castle carries into the next fight; each win
+patches up to 420 stone of it. Every fight pays XP (20 plus 6 per castle toppled so far for a
+win, 10 for the loss that ends the run), and the best run is kept. In computer-run tests a
+hard-level player toppled about five castles on average and ten at best.
+
+### Castle codes
+
+The builder's Share button turns the castle (pieces and heart type) into a text code such as
+`KS-0A3F…` and opens the share sheet with a short invitation. Paste code loads a code into
+the builder. On the menu, Friend's castle pastes a code and starts a match against that castle
+at the chosen difficulty. A code carries a checksum and is checked against the building rules,
+so a mistyped or tampered code is refused.
+
+### Achievements
+
+Seventeen one-time goals, each worth 50 XP: first win, 10 wins, 25 criticals, 10 mega shots, a
+flawless win (heart untouched), a win with under 30 % of the castle standing, 3 decoys broken
+by the enemy, 5 and 10 castles in one gauntlet run, clearing the campaign, all 36 stars, 1,500
+in a daily siege, a 5-win streak, level 10, saving your own castle, beating a friend's castle,
+and reaching the Legend league. The profile opens a panel with every goal and its progress.
+With Game Center, each one is reported as `kalesavasi.<id>` (for example
+`kalesavasi.flawless`), and the best gauntlet run goes to the leaderboard `kalesavasi.gauntlet`.
+
 ### What carries over between matches
 
 The profile (stored on the device) keeps level and XP, trophies and league, win streak, daily
@@ -131,6 +175,8 @@ every day.
 | Quick match | Computer opponent, three difficulty levels, random enemy castle |
 | Two players, one device | Pass-and-play |
 | Daily Siege | Solo score attack, same castle for everyone each day |
+| Gauntlet | Endless run of computer castles, damage carries over |
+| Friend's castle | Computer match against a castle pasted as a code |
 | Online: nearby player | MultipeerConnectivity, same Wi-Fi or Bluetooth, no account |
 | Online: Game Center | Real-time `GKMatch` over the internet, friends or auto-match |
 

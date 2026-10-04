@@ -3,10 +3,10 @@ import SceneKit
 import QuartzCore
 
 enum Screen { case menu, lobby, playing, over, builder }
-enum Mode { case ai, local, online, challenge, campaign }
+enum Mode { case ai, local, online, challenge, campaign, gauntlet }
 enum OnlineKind { case gameCenter, nearby }
 /// Which card the menu screen shows.
-enum Panel { case home, profile, settings, howTo, campaign }
+enum Panel { case home, profile, settings, howTo, campaign, achievements }
 
 struct HUD: Equatable {
     var names = ["", ""]
@@ -58,6 +58,9 @@ struct OverInfo: Equatable {
     var isSiege = false
     /// Campaign: the win opened another stage to move on to.
     var hasNextStage = false
+    /// Gauntlet: the run goes on with the next castle, or it is over.
+    var isGauntlet = false
+    var gauntletNext = false
 }
 
 struct MissionRow: Identifiable {
@@ -102,12 +105,14 @@ final class GameController: NSObject, ObservableObject {
     @Published var tool: PieceKind? = .wallLow
     @Published var erasing = false
     @Published var builderNote: String?
+    /// The final, heart-breaking shot is playing out in slow motion.
+    @Published var finale = false
     var viewSize = CGSize(width: 844, height: 390)
 
     private enum Phase { case menu, aim, flight, impact, over }
     private enum Driver { case human, computer, remote }
-    private enum Cam { case menu, aim, target, follow, impact }
-    private struct Flight { var side: Int; var res: ShotResult; var path: [Vec3]; var i = 0.0; var popped = false }
+    private enum Cam { case menu, aim, target, follow, impact, finale }
+    private struct Flight { var side: Int; var res: ShotResult; var path: [Vec3]; var i = 0.0; var popped = false; var final = false }
 
     private var mode = Mode.ai
     private var me = 0
@@ -130,6 +135,12 @@ final class GameController: NSObject, ObservableObject {
     private var rival: (name: String, trophies: Int, level: Int, design: CastleDesign)?
     private var toastWork: DispatchWorkItem?
     private var lastTile: (Int, Int)?
+    // Gauntlet run
+    private var gauntletRound = 1
+    private var gauntletSeed: UInt32 = 0
+    private var gauntletCarry: Castle?
+    /// The castle loaded from a friend's code, while playing against it.
+    private var friendDesign: CastleDesign?
 
     private var cam = Cam.menu
     private var camSide = 0
@@ -207,6 +218,29 @@ final class GameController: NSObject, ObservableObject {
         startGame(.ai, seed: seed, designs: [profile.castle, Presets.pick(seed)])
     }
 
+    func playGauntlet() {
+        sfx.play(.tick)
+        gauntletRound = 1
+        gauntletSeed = UInt32.random(in: 0...UInt32.max)
+        gauntletCarry = nil
+        startGauntletRound()
+    }
+
+    private func startGauntletRound() {
+        let foe = Gauntlet.foe(round: gauntletRound, seed: gauntletSeed)
+        aiLevel = foe.difficulty
+        startGame(.gauntlet, seed: gauntletSeed &+ UInt32(gauntletRound), designs: [profile.castle, foe.design], rules: MatchRules(foe.modifier), carry: gauntletCarry)
+        if foe.modifier == .none { show(toast: Tx.gauntletRound(gauntletRound)) }
+    }
+
+    /// Attacks a castle pasted as a code, at the chosen difficulty.
+    func playFriend(code: String) {
+        guard let d = CastleCode.decode(code) else { show(toast: Tx.codeInvalid); sfx.play(.thud); return }
+        sfx.play(.tick)
+        aiLevel = difficulty
+        startGame(.ai, designs: [profile.castle, d], friend: d)
+    }
+
     func playLocal() { sfx.play(.tick); startGame(.local, designs: [profile.castle, profile.castle]) }
 
     func playSiege() {
@@ -257,7 +291,7 @@ final class GameController: NSObject, ObservableObject {
         phase = .menu
         cam = .menu
         menuA = Double(atan2(camPos.x, camPos.z))
-        pull = nil; ghost = nil; over = nil; timeLeft = nil; megaArmed = false; ammo = .standard; confirmQuit = false
+        pull = nil; ghost = nil; over = nil; timeLeft = nil; megaArmed = false; ammo = .standard; confirmQuit = false; finale = false
         world.hidePreview()
         world.endBall()
         screen = .menu
@@ -275,7 +309,10 @@ final class GameController: NSObject, ObservableObject {
         case .challenge: playSiege()
         case .campaign:
             if over?.hasNextStage == true { playStage(profile.nextStage) } else if let s = stage { playStage(s) }
-        case .ai: playComputer()
+        case .ai:
+            if let d = friendDesign { aiLevel = difficulty; startGame(.ai, designs: [profile.castle, d], friend: d) } else { playComputer() }
+        case .gauntlet:
+            if over?.gauntletNext == true { gauntletRound += 1; startGauntletRound() } else { playGauntlet() }
         case .local: startGame(.local, first: 1 - battle.first, designs: [profile.castle, profile.castle])
         }
     }
@@ -386,13 +423,35 @@ final class GameController: NSObject, ObservableObject {
 
     func loadDraft(_ d: CastleDesign) { draft = d; draftChanged(); sfx.play(.tick) }
 
+    func pick(heart h: HeartKind) {
+        guard profile.owns(h) else { builderNote = Tx.heartLocked(h.level); return }
+        var next = draft
+        next.heart = h
+        guard next.cost <= CastleDesign.budget else { builderNote = Tx.noStone; return }
+        draft = next
+        draftChanged()
+        builderNote = Tx.heart(h) + ": " + Tx.heartInfo(h)
+        sfx.play(.tick)
+    }
+
+    /// The draft as a code to send, once it is a castle that can be played.
+    var draftCode: String? { draft.problem == nil ? CastleCode.encode(draft) : nil }
+
+    func pasteCastle(_ text: String) {
+        guard let d = CastleCode.decode(text) else { builderNote = Tx.codeInvalid; sfx.play(.thud); return }
+        loadDraft(d)
+        builderNote = Tx.codeLoaded
+    }
+
     func saveCastle() {
         if let pr = draft.problem { builderNote = Tx.problem(pr); return }
         profile.design = draft.encoded
+        profile.castlesSaved += 1
+        let fresh = profile.unlockAchievements()
         profile.save()
         sfx.play(.charged)
         closeBuilder()
-        show(toast: Tx.saved)
+        show(toast: fresh.first.map(Tx.achievementDone) ?? Tx.saved)
     }
 
     func closeBuilder() {
@@ -406,14 +465,18 @@ final class GameController: NSObject, ObservableObject {
     // MARK: Turn flow
 
     private func startGame(_ m: Mode, seed: UInt32? = nil, me: Int = 0, first: Int = 0, round: Int = 1,
-                           designs: [CastleDesign], rules: MatchRules = MatchRules(), stage: Stage? = nil) {
+                           designs: [CastleDesign], rules: MatchRules = MatchRules(), stage: Stage? = nil,
+                           carry: Castle? = nil, friend: CastleDesign? = nil) {
         mode = m
+        friendDesign = friend
+        finale = false
         self.me = me
         self.round = round
         self.stage = stage
         oppGone = false; wantAgain = false; oppAgain = false; pendingShot = nil
         flight = nil; plan = nil; remoteAim = nil; ts = 1; slowT = 0
         battle = Battle(seed: seed ?? UInt32.random(in: 0...UInt32.max), first: first, designs: designs, rules: rules)
+        if let c = carry { battle.castles[0].adopt(c) }
         world.load(battle)
         aims = [Aim(), Aim()]
         lastPull = [nil, nil]
@@ -428,7 +491,7 @@ final class GameController: NSObject, ObservableObject {
 
     private func names() -> [String] {
         switch mode {
-        case .ai, .campaign: return [Tx.you, Tx.computer]
+        case .ai, .campaign, .gauntlet: return [Tx.you, friendDesign == nil ? Tx.computer : Tx.friendName]
         case .online:
             let them = (rival?.name).flatMap { $0.isEmpty ? nil : $0 } ?? Tx.opponent
             return me == 0 ? [Tx.you, them] : [them, Tx.you]
@@ -439,7 +502,7 @@ final class GameController: NSObject, ObservableObject {
 
     private func driverOf(_ side: Int) -> Driver {
         switch mode {
-        case .ai, .campaign: return side == 0 ? .human : .computer
+        case .ai, .campaign, .gauntlet: return side == 0 ? .human : .computer
         case .local, .challenge: return .human
         case .online: return side == me ? .human : .remote
         }
@@ -492,7 +555,7 @@ final class GameController: NSObject, ObservableObject {
 
     private func launch(side: Int, p0: Vec3, v0: Vec3, d: Vec3, ammo shot: Ammo, mega: Bool) {
         let f = battle.fly(p0: p0, v0: v0, wind: wind, ammo: shot, mega: mega)
-        flight = Flight(side: side, res: f.res, path: f.path)
+        flight = Flight(side: side, res: f.res, path: f.path, final: battle.wouldBreakHeart(f.res) != nil)
         phase = .flight
         ts = 1
         cam = .follow
@@ -547,6 +610,7 @@ final class GameController: NSObject, ObservableObject {
             if out.damage[enemy].heart > 0 { msg = (battle.castles[enemy].heartLost ? Tx.heartBroken : Tx.heartHit) + "  ·  " + msg }
             else if out.damage[f.side].heart > 0 { msg = Tx.ownHeart }
             if out.shieldBroken != nil { msg = Tx.shieldBroken + "  ·  " + msg }
+            if out.aegis != nil { msg = Tx.aegisUp + "  ·  " + msg }
         }
         if dealt == 0, out.damage[f.side].cells == 0, let k = out.pickup { msg = Tx.grabbed(k) }
         if res.crit { sfx.play(.crit) }
@@ -560,6 +624,7 @@ final class GameController: NSObject, ObservableObject {
         phase = .impact
         impactT = any ? (res.mega || res.ammo == .cluster ? 4.4 : 3.8) : 1.9
         slowT = any ? 0.8 : 0
+        if f.final { impactT += 1.6; slowT = 2.2 }
         flight = nil
         refreshHUD()
     }
@@ -589,8 +654,14 @@ final class GameController: NSObject, ObservableObject {
             return
         }
         if let loser = battle.loser() { gameOver(winner: 1 - loser); return }
+        finale = false
         battle.advance()
         beginTurn()
+        if let g = battle.regrown {
+            world.restoreBlocks(side: g.side, ids: [g.block])
+            show(toast: Tx.heartRegrew)
+            refreshHUD()
+        }
     }
 
     private func enterOverState(lookingAt winner: Int) {
@@ -610,6 +681,7 @@ final class GameController: NSObject, ObservableObject {
         refreshHUD()
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
             guard let self, self.phase == .over else { return }
+            self.finale = false
             self.over = info
             if self.oppAgain { self.over?.detail = Tx.rematchWanted }
             self.screen = .over
@@ -644,8 +716,15 @@ final class GameController: NSObject, ObservableObject {
             info.title = won ? Tx.won : Tx.lost
             sfx.play(won ? .win : .lose)
             var updated = profile
+            let own = battle.castles[mine]
+            let facts = MatchFacts(heartPct: own.heartPct, castlePct: own.pct, decoysFooled: own.decoyRevealed.filter { $0 }.count,
+                                   friend: friendDesign != nil)
+            if mode == .gauntlet && !forfeit {
+                presentGauntlet(won: won, facts: facts, info: &info, profile: &updated)
+                return
+            }
             let rewardMode: RewardMode = mode == .online ? .online(opponent: rival?.trophies) : .computer(aiLevel)
-            info.reward = updated.record(won: won, mode: rewardMode, stats: stats[mine], stage: stage,
+            info.reward = updated.record(won: won, mode: rewardMode, stats: stats[mine], facts: facts, stage: stage,
                                          stageStars: won ? Stage.stars(ownPct: battle.castles[mine].pct) : 0)
             info.stats = stats[mine]
             info.rivalStats = stats[1 - mine]
@@ -664,6 +743,31 @@ final class GameController: NSObject, ObservableObject {
             sfx.play(.win)
         }
         info.names = nm
+        present(info)
+    }
+
+    private func presentGauntlet(won: Bool, facts: MatchFacts, info: inout OverInfo, profile updated: inout Profile) {
+        let toppled = won ? gauntletRound : gauntletRound - 1
+        info.isGauntlet = true
+        info.gauntletNext = won
+        info.reward = updated.recordGauntlet(won: won, toppled: toppled, stats: stats[0], facts: facts)
+        info.stats = stats[0]
+        info.rivalStats = stats[1]
+        info.side = 0
+        info.names = names()
+        if won {
+            let carry = battle.castles[0]
+            let fixed = carry.repair(cells: Gauntlet.repairCells).reduce(0) { $0 + carry.blocks[$1].len }
+            gauntletCarry = carry
+            info.title = Tx.gauntletWon(gauntletRound)
+            info.detail = Tx.gauntletCarry(fixed)
+        } else {
+            gauntletCarry = nil
+            info.title = Tx.gauntletOver
+            info.detail = Tx.gauntletToppled(toppled)
+        }
+        updated.save()
+        profile = updated
         present(info)
     }
 
@@ -764,7 +868,7 @@ final class GameController: NSObject, ObservableObject {
     /// Dotted start of the flight. Beginners playing an easy computer see more of it.
     private func showPreview(side s: Int) {
         let l = Ballistics.launch(side: s, aim: aims[s])
-        let dots = (mode == .ai || mode == .campaign) && aiLevel == .kolay ? 36 : 20
+        let dots = (mode == .ai || mode == .campaign || mode == .gauntlet) && aiLevel == .kolay ? 36 : 20
         var x = l.p0.x, y = l.p0.y, z = l.p0.z, vx = l.v0.x, vy = l.v0.y, vz = l.v0.z
         var pts: [SIMD3<Float>] = []
         for i in 1...(dots * 9) {
@@ -912,6 +1016,14 @@ final class GameController: NSObject, ObservableObject {
         if phase == .flight, var f = flight {
             let n = f.res.steps
             ts = (Double(n) - f.i < 34 && f.res.kind != .out) ? 0.4 : 1
+            if f.final && Double(n) - f.i < 120 {
+                ts = 0.3
+                if cam != .finale {
+                    cam = .finale
+                    finale = true
+                    sfx.play(.charged)
+                }
+            }
             f.i = min(Double(n), f.i + dt * 120 * ts)
             let i0 = min(n - 1, Int(f.i)), fr = Float(f.i - Double(i0))
             let a = f.path[i0].f, b = f.path[i0 + 1].f
@@ -985,6 +1097,13 @@ final class GameController: NSObject, ObservableObject {
             // stay above the walls instead of flying through them
             if abs(tPos.x) > Float(K.front) - 5 && abs(tPos.x) < Float(K.xEdge) + 3 && abs(tPos.z) < Float(K.gd) / 2 + 3 { tPos.y = max(tPos.y, 25) }
             k = 7
+        case .finale:
+            let b = world.ball.simdPosition, d = ballDir
+            tPos = b + SIMD3(-d.z, 0, d.x) * 15 - d * 5 + SIMD3(0, 4, 0)
+            tLook = b + d * 2
+            if abs(tPos.x) > Float(K.front) - 5 && abs(tPos.x) < Float(K.xEdge) + 3 && abs(tPos.z) < Float(K.gd) / 2 + 3 { tPos.y = max(tPos.y, 22) }
+            k = 5
+            wantFov = 38
         case .impact:
             impactA += dt * 0.13
             let d = impactDir, c = Float(cos(impactA + 0.45)), s = Float(sin(impactA + 0.45))

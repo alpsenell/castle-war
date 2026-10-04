@@ -27,7 +27,7 @@ enum K {
     static let shieldFactor = 0.6                    // blast radius against a shielded castle
     static let repairCells = 110
     static let heartReach = 0.5                      // the heart only breaks this much closer to a blast than stone does
-    static let rulesVersion = 3                      // bumped whenever an online match would play out differently
+    static let rulesVersion = 4                      // bumped whenever an online match would play out differently
     static let cells = gw * gh * gd
 }
 
@@ -158,6 +158,8 @@ struct ShotOutcome {
     var repaired: [Int] = []
     var pickup: PickupKind?
     var shieldBroken: Int?
+    /// Side whose aegis heart just threw up a shield.
+    var aegis: Int?
 }
 
 @inline(__always) func cellIndex(_ x: Int, _ y: Int, _ z: Int) -> Int { (y * K.gw + x) * K.gd + z }
@@ -179,6 +181,17 @@ enum PieceKind: Int, CaseIterable, Identifiable {
     var fitsUnderShelter: Bool { self == .heart || self == .decoy }
 }
 
+/// What the heart can do besides being protected. Chosen in the builder, unlocked by level.
+enum HeartKind: Int, CaseIterable, Identifiable {
+    case crystal = 0, living, aegis, titan
+    var id: Int { rawValue }
+    /// Stone it costs on top of the free crystal heart.
+    var cost: Int { [0, 80, 80, 100][rawValue] }
+    var level: Int { [1, 4, 7, 10][rawValue] }
+    /// Courses of crystal it stands.
+    var courses: Int { self == .titan ? 4 : 3 }
+}
+
 struct Piece: Equatable {
     var kind: PieceKind
     var tx: Int      // tile row, 0 = back of the castle
@@ -189,6 +202,7 @@ struct Piece: Equatable {
 /// Every castle guards one heart; the heart is free, the keep is optional.
 struct CastleDesign: Equatable {
     var pieces: [Piece] = []
+    var heart = HeartKind.crystal
 
     static let rows = K.gw / 2, cols = K.gd / 2
     static let budget = 2400, minimum = 1200
@@ -208,7 +222,7 @@ struct CastleDesign: Equatable {
     }()
 
     static func cost(of kind: PieceKind) -> Int { costs[kind] ?? 0 }
-    var cost: Int { pieces.reduce(0) { $0 + CastleDesign.cost(of: $1.kind) } }
+    var cost: Int { pieces.reduce(heart.cost) { $0 + CastleDesign.cost(of: $1.kind) } }
     var keeps: Int { pieces.filter { $0.kind == .keep }.count }
     var hearts: Int { pieces.filter { $0.kind == .heart }.count }
     var decoys: Int { pieces.filter { $0.kind == .decoy }.count }
@@ -255,19 +269,32 @@ struct CastleDesign: Equatable {
         return nil
     }
 
-    /// Flat form for storage and the network: kind, row, column per piece.
-    var encoded: [Int] { pieces.flatMap { [$0.kind.rawValue, $0.tx, $0.tz] } }
+    /// Flat form for storage and the network: kind, row, column per piece, then the heart kind
+    /// as a triple led by `heartTag` when it is not the plain crystal.
+    var encoded: [Int] {
+        pieces.flatMap { [$0.kind.rawValue, $0.tx, $0.tz] } + (heart == .crystal ? [] : [CastleDesign.heartTag, heart.rawValue, 0])
+    }
+    static let heartTag = 100
 
     /// Rebuilds a design from its flat form. Returns nil for anything that is not a playable castle.
     init?(encoded: [Int]) {
-        guard encoded.count % 3 == 0, encoded.count <= 3 * CastleDesign.rows * CastleDesign.cols else { return nil }
-        var out: [Piece] = []
+        guard let d = CastleDesign.unchecked(encoded), d.problem == nil else { return nil }
+        self = d
+    }
+
+    private static func unchecked(_ encoded: [Int]) -> CastleDesign? {
+        guard encoded.count % 3 == 0, encoded.count <= 3 * (rows * cols + 1) else { return nil }
+        var d = CastleDesign()
         for i in stride(from: 0, to: encoded.count, by: 3) {
+            if encoded[i] == heartTag {
+                guard let h = HeartKind(rawValue: encoded[i + 1]) else { return nil }
+                d.heart = h
+                continue
+            }
             guard let k = PieceKind(rawValue: encoded[i]) else { return nil }
-            out.append(Piece(kind: k, tx: encoded[i + 1], tz: encoded[i + 2]))
+            d.pieces.append(Piece(kind: k, tx: encoded[i + 1], tz: encoded[i + 2]))
         }
-        pieces = out
-        if problem != nil { return nil }
+        return d
     }
 
     init(pieces: [Piece] = []) { self.pieces = pieces }
@@ -275,13 +302,7 @@ struct CastleDesign: Equatable {
     /// Reads a castle saved before hearts existed: the heart goes on the free tile nearest the back centre.
     static func migrating(encoded: [Int]) -> CastleDesign? {
         if let d = CastleDesign(encoded: encoded) { return d }
-        guard encoded.count % 3 == 0 else { return nil }
-        var d = CastleDesign()
-        for i in stride(from: 0, to: encoded.count, by: 3) {
-            guard let k = PieceKind(rawValue: encoded[i]) else { return nil }
-            d.pieces.append(Piece(kind: k, tx: encoded[i + 1], tz: encoded[i + 2]))
-        }
-        guard d.hearts == 0 else { return nil }
+        guard var d = unchecked(encoded), d.hearts == 0 else { return nil }
         var spots: [(Int, Int)] = []
         for r in 0..<rows { for c in 0..<cols where d.fits(.heart, row: r, col: c) { spots.append((r, c)) } }
         let mid = cols / 2
@@ -445,7 +466,10 @@ private struct Plan {
 
     init() {}
 
+    var heartKind = HeartKind.crystal
+
     init(_ design: CastleDesign) {
+        heartKind = design.heart
         for p in design.pieces { add(p) }
     }
 
@@ -507,7 +531,7 @@ private struct Plan {
 
     /// The heart: three courses of glowing crystal, harder to break than stone. Lose it and the castle falls.
     private mutating func heart(_ x0: Int, _ z0: Int) {
-        box(x0, x0 + 1, 0, 2, z0, z0 + 1, 4)
+        box(x0, x0 + 1, 0, heartKind.courses - 1, z0, z0 + 1, 4)
     }
 
     /// Solid wall, two cells thick, with a team-colour top course and battlements.
@@ -622,6 +646,7 @@ final class Castle {
     private(set) var decoyRevealed: [Bool]
     /// Corner cells of the moat tiles. A shot that lands in one only splashes.
     let moats: [(x: Int, z: Int)]
+    let heartKind: HeartKind
 
     init(side: Int, design: CastleDesign) {
         self.side = side
@@ -652,6 +677,7 @@ final class Castle {
         decoyOf = dOf
         decoyRevealed = Array(repeating: false, count: plan.decoys.count)
         moats = plan.moats
+        heartKind = design.heart
         for i in blocks.indices where blocks[i].mat == 5 { blocks[i].hp = 2 }
     }
 
@@ -783,6 +809,36 @@ final class Castle {
         for i in d.decoys { decoyRevealed[i] = true }
     }
 
+    /// Takes over the state of an earlier castle built from the same design: what fell stays down.
+    func adopt(_ other: Castle) {
+        guard other.blocks.count == blocks.count else { return }
+        for i in blocks.indices { blocks[i].alive = other.blocks[i].alive; blocks[i].hp = other.blocks[i].hp }
+        decoyRevealed = other.decoyRevealed
+        aliveCells = other.aliveCells
+        heartAlive = other.heartAlive
+    }
+
+    /// A living heart grows back one lost crystal block. Returns it, if one could grow.
+    func regrowHeart() -> Int? {
+        guard heartKind == .living, heartAlive > 0, heartAlive < heartTotal else { return nil }
+        for i in blocks.indices where blocks[i].mat == 4 && !blocks[i].alive && !blocks[i].ghost {
+            let b = blocks[i]
+            var held = b.y == 0
+            if !held {
+                for k in 0..<b.len {
+                    let id = cellBlock[cellIndex(b.x + (b.dir == 1 ? k : 0), b.y - 1, b.z + (b.dir == 2 ? k : 0))]
+                    if id >= 0 && blocks[id].alive { held = true; break }
+                }
+            }
+            guard held else { continue }
+            blocks[i].alive = true
+            aliveCells += b.len
+            heartAlive += b.len
+            return i
+        }
+        return nil
+    }
+
     /// Puts fallen blocks back, lowest first, as long as each has something to stand on. Returns what was rebuilt.
     func repair(cells budget: Int) -> [Int] {
         var left = budget, out: [Int] = []
@@ -824,6 +880,10 @@ final class Battle {
     private(set) var shield = [false, false]
     private(set) var pickup: Pickup?
     private var nextSpawn = 2
+    /// An aegis heart shields its castle once per match.
+    private(set) var aegisUsed = [false, false]
+    /// Heart block that grew back at the start of the last turn, and on which side.
+    private(set) var regrown: (side: Int, block: Int)?
 
     init(seed: UInt32, first: Int, designs: [CastleDesign] = [.classic, .classic], rules: MatchRules = MatchRules()) {
         self.seed = seed
@@ -856,6 +916,7 @@ final class Battle {
     /// Moves to the next turn (or skips the other side's, in the solo siege) and looks after the balloon.
     func advance(by n: Int = 1) {
         shot += n
+        regrown = castles[turn].regrowHeart().map { (turn, $0) }
         guard rules.pickups else { return }
         if let p = pickup, shot - p.born >= 4 { pickup = nil; nextSpawn = shot + 2 }
         if pickup == nil && shot >= nextSpawn {
@@ -979,6 +1040,11 @@ final class Battle {
             shield[i] = false
             out.shieldBroken = i
         }
+        for i in 0..<2 where castles[i].heartKind == .aegis && !aegisUsed[i] && out.damage[i].heart > 0 && !castles[i].heartLost {
+            aegisUsed[i] = true
+            shield[i] = true
+            out.aegis = i
+        }
         if res.ammo != .standard { stock[s][res.ammo.rawValue] = max(0, stock[s][res.ammo.rawValue] - 1) }
         let dealt = Double(out.damage[e].cells) / Double(castles[e].total)
         if res.mega { charge[s] = 0 }
@@ -1007,6 +1073,17 @@ final class Battle {
 
     /// The side to move let the shot clock run out.
     func forfeitTurn() { streak[turn] = 0 }
+
+    /// The side whose heart this shot would break, worked out before it lands. Overlapping
+    /// blasts can count a block twice, so it may now and then call a shot that falls just short.
+    func wouldBreakHeart(_ res: ShotResult) -> Int? {
+        for (i, c) in castles.enumerated() where c.heartAlive > 0 {
+            var cells = 0
+            for b in res.blasts { cells += c.damage(at: b.center, radius: b.radius * (shield[i] ? K.shieldFactor : 1)).heart }
+            if cells >= c.heartAlive { return i }
+        }
+        return nil
+    }
 
     /// The side whose heart is gone. If one shot takes both hearts, the side that fired it loses.
     func loser() -> Int? {
@@ -1162,4 +1239,90 @@ struct Stage: Identifiable {
 
     /// Stars for a win, by how much of your own castle is still standing.
     static func stars(ownPct: Double) -> Int { ownPct >= 0.6 ? 3 : ownPct >= 0.4 ? 2 : 1 }
+}
+
+// MARK: - Gauntlet
+
+/// Castle after castle until yours falls. Damage carries over; a win patches some of it up.
+enum Gauntlet {
+    static let repairCells = 420
+
+    struct Foe {
+        let design: CastleDesign
+        let difficulty: Difficulty
+        let modifier: Modifier
+    }
+
+    /// The castle met in a round (1 is the first), harder as the run goes on.
+    static func foe(round: Int, seed: UInt32) -> Foe {
+        var r = Mulberry32(seed ^ (UInt32(truncatingIfNeeded: round) &* 0x27D4_EB2F))
+        _ = r.next()
+        var design = Presets.all[min(Presets.all.count - 1, Int(r.next() * Double(Presets.all.count)))]
+        if round >= 11 { design.heart = .aegis } else if round >= 8 { design.heart = .living }
+        let difficulty: Difficulty = round <= 3 ? .kolay : round <= 7 ? .orta : .zor
+        let twists = Modifier.allCases.filter { $0 != .none }
+        let modifier = round >= 4 && round % 3 == 1 ? twists[min(twists.count - 1, Int(r.next() * Double(twists.count)))] : Modifier.none
+        return Foe(design: design, difficulty: difficulty, modifier: modifier)
+    }
+}
+
+// MARK: - Castle codes
+
+/// A castle as a short text code that can be sent to a friend and pasted back into the game.
+enum CastleCode {
+    static let prefix = "KS-"
+    private static let alphabet = Array("0123456789ABCDEFGHJKMNPQRSTVWXYZ")
+
+    static func encode(_ d: CastleDesign) -> String {
+        var bits: [Bool] = []
+        func put(_ v: Int, _ n: Int) { for i in stride(from: n - 1, through: 0, by: -1) { bits.append((v >> i) & 1 == 1) } }
+        put(1, 4)
+        put(d.heart.rawValue, 4)
+        put(d.pieces.count, 8)
+        for p in d.pieces { put(p.kind.rawValue, 4); put(p.tx, 4); put(p.tz, 4) }
+        put(checksum(d), 8)
+        while bits.count % 5 != 0 { bits.append(false) }
+        var out = prefix
+        for i in stride(from: 0, to: bits.count, by: 5) {
+            var v = 0
+            for b in bits[i..<i + 5] { v = v * 2 + (b ? 1 : 0) }
+            out.append(alphabet[v])
+        }
+        return out
+    }
+
+    /// Finds a castle code anywhere in a piece of text. Returns nil unless it is a playable castle.
+    static func decode(_ text: String) -> CastleDesign? {
+        let up = text.uppercased()
+        guard let start = up.range(of: prefix) else { return nil }
+        var bits: [Bool] = []
+        for ch in up[start.upperBound...] {
+            let c: Character = ch == "O" ? "0" : ch == "I" || ch == "L" ? "1" : ch
+            guard let v = alphabet.firstIndex(of: c) else { break }
+            for i in stride(from: 4, through: 0, by: -1) { bits.append((v >> i) & 1 == 1) }
+        }
+        var at = 0
+        func take(_ n: Int) -> Int? {
+            guard at + n <= bits.count else { return nil }
+            var v = 0
+            for b in bits[at..<at + n] { v = v * 2 + (b ? 1 : 0) }
+            at += n
+            return v
+        }
+        guard take(4) == 1, let h = take(4), let heart = HeartKind(rawValue: h), let n = take(8) else { return nil }
+        var d = CastleDesign()
+        d.heart = heart
+        for _ in 0..<n {
+            guard let k = take(4), let kind = PieceKind(rawValue: k), let tx = take(4), let tz = take(4) else { return nil }
+            d.pieces.append(Piece(kind: kind, tx: tx, tz: tz))
+        }
+        guard take(8) == checksum(d), d.problem == nil else { return nil }
+        return d
+    }
+
+    private static func checksum(_ d: CastleDesign) -> Int {
+        var h = 17 &* 31 &+ d.heart.rawValue
+        for p in d.pieces { h = h &* 31 &+ p.kind.rawValue &* 225 &+ p.tx &* 15 &+ p.tz }
+        return ((h % 256) + 256) % 256
+    }
 }
