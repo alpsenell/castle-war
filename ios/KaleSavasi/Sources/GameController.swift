@@ -3,10 +3,10 @@ import SceneKit
 import QuartzCore
 
 enum Screen { case menu, lobby, playing, over, builder }
-enum Mode { case ai, local, online, challenge, campaign, gauntlet }
-enum OnlineKind { case gameCenter, nearby }
+enum Mode { case ai, local, online, challenge, campaign, gauntlet, party }
+enum OnlineKind { case gameCenter, nearby, partyGameCenter, partyHost, partyJoin }
 /// Which card the menu screen shows.
-enum Panel { case home, profile, settings, howTo, campaign, achievements }
+enum Panel { case home, profile, settings, howTo, campaign, achievements, party }
 
 struct HUD: Equatable {
     var names = ["", ""]
@@ -34,6 +34,12 @@ struct HUD: Equatable {
     /// Daily siege only: running score and how many shots have been taken.
     var score: Int?
     var shotsTaken = 0
+    /// Four-castle matches: which seats are out, which one is this device, and the castles the
+    /// player can aim at with the one picked.
+    var out: [Bool] = [false, false]
+    var me: Int?
+    var targets: [Int] = []
+    var target = -1
 }
 
 /// A pull-back gesture in progress, in screen points.
@@ -75,6 +81,10 @@ struct Lobby: Equatable {
     var kind = OnlineKind.nearby
     var status = ""
     var busy = true
+    /// Four-castle lobbies: players here so far, this device included, and whether this device may start.
+    var players = 1
+    var canStart = false
+    var isParty: Bool { kind == .partyGameCenter || kind == .partyHost || kind == .partyJoin }
 }
 
 /// Runs the match: whose turn it is, shots, the cameras and what the HUD shows.
@@ -141,6 +151,21 @@ final class GameController: NSObject, ObservableObject {
     private var gauntletCarry: Castle?
     /// The castle loaded from a friend's code, while playing against it.
     private var friendDesign: CastleDesign?
+    // Four-castle match
+    private var seats: [SeatInfo] = []
+    /// Online players who left; a computer run by the host plays their castle from then on.
+    private var seatGone: [Bool] = []
+    /// Seats in the order their hearts broke.
+    private var outOrder: [Int] = []
+    /// The reward booked when this device's heart broke, shown again on the final card.
+    private var partyReward: Reward?
+    /// Players who said hello in a four-castle lobby, by nonce.
+    private var partyPeers: [UInt32: SeatInfo] = [:]
+    private var hostNonce: UInt32 = 0
+    private var lastSeen: [UInt32: Double] = [:]
+    private var pingT = 0.0, clock = 0.0
+    /// The castle the inspect and end-of-match cameras circle.
+    private var viewSeat = 1
 
     private var cam = Cam.menu
     private var camSide = 0
@@ -192,7 +217,12 @@ final class GameController: NSObject, ObservableObject {
     }
 
     /// The side whose results count for this device's profile; nil in pass-and-play.
-    private var mySide: Int? { mode == .local ? nil : mode == .online ? me : 0 }
+    private var mySide: Int? { mode == .local ? nil : mode == .online || mode == .party ? me : 0 }
+
+    /// A four-castle match played over the network.
+    private var partyOnline: Bool { mode == .party && net != nil }
+    /// This device runs the computer seats: always offline, the host online.
+    private var runsComputers: Bool { mode != .party || net == nil || isHost }
 
     var missions: [MissionRow] {
         profile.missionRows().map { MissionRow(id: $0.mission.id, title: Tx.mission($0.mission), progress: $0.progress, target: $0.mission.target, done: $0.done) }
@@ -241,6 +271,26 @@ final class GameController: NSObject, ObservableObject {
         startGame(.ai, designs: [profile.castle, d], friend: d)
     }
 
+    /// Four castles: the player against three computers.
+    func playParty() {
+        sfx.play(.tick)
+        stopNet()
+        aiLevel = difficulty
+        var picks = Presets.all.shuffled()
+        seats = [SeatInfo(nonce: 0, name: Tx.you, level: profile.level, design: profile.castle.encoded)]
+        for i in 1..<4 { seats.append(SeatInfo(nonce: 0, name: Tx.seatName(i), level: 1, design: picks.removeFirst().encoded)) }
+        startParty(seed: UInt32.random(in: 0...UInt32.max), me: 0, first: Int.random(in: 0..<4), round: 1)
+    }
+
+    private func startParty(seed: UInt32, me seat: Int, first: Int, round r: Int) {
+        let designs = seats.map { CastleDesign(encoded: $0.design) ?? .classic }
+        outOrder = []
+        partyReward = nil
+        seatGone = Array(repeating: false, count: seats.count)
+        startGame(.party, seed: seed, me: seat, first: first, round: r, designs: designs, arena: .party)
+        show(toast: Tx.partyTitle)
+    }
+
     func playLocal() { sfx.play(.tick); startGame(.local, designs: [profile.castle, profile.castle]) }
 
     func playSiege() {
@@ -262,16 +312,28 @@ final class GameController: NSObject, ObservableObject {
         stopNet()
         lobby = Lobby(kind: kind, status: "")
         screen = .lobby
-        let t: MatchTransport = kind == .gameCenter ? GameCenterTransport() : NearbyTransport()
+        let t: MatchTransport
+        switch kind {
+        case .gameCenter: t = GameCenterTransport()
+        case .nearby: t = NearbyTransport()
+        case .partyGameCenter: t = GameCenterTransport(players: 4)
+        case .partyHost: t = NearbyTransport(role: .host)
+        case .partyJoin: t = NearbyTransport(role: .join)
+        }
+        partyPeers = [:]
+        lastSeen = [:]
+        myNonce = UInt32.random(in: 1...UInt32.max)
+        if kind == .partyHost { isHost = true; lobby.canStart = false }
         net = t
         t.onStatus = { [weak self] s, busy in self?.lobby.status = s; self?.lobby.busy = busy }
         t.onConnected = { [weak self] in self?.netConnected() }
         t.onMessage = { [weak self] m in self?.netMessage(m) }
         t.onDisconnected = { [weak self] in self?.netLost() }
+        t.onPeers = { [weak self] _ in self?.partyLobbyChanged() }
         t.start()
     }
 
-    var quitWarning: String { mode == .online ? Tx.quitOnline : Tx.quitPlain }
+    var quitWarning: String { mode == .online || partyOnline ? Tx.quitOnline : Tx.quitPlain }
 
     /// The home button during a match: ask first, since leaving can cost a loss.
     func askToQuit() {
@@ -283,6 +345,12 @@ final class GameController: NSObject, ObservableObject {
         if mode == .online, screen == .playing, phase != .over, phase != .menu, battle.shot >= 2, !oppGone {
             var p = profile
             _ = p.record(won: false, mode: .online(opponent: rival?.trophies), stats: stats[me], forfeit: true)
+            p.save()
+            profile = p
+        }
+        if partyOnline, screen == .playing, phase != .over, phase != .menu, !outOrder.contains(me) {
+            var p = profile
+            _ = p.record(won: false, mode: .party(place: battle.standing.count, online: true), stats: stats[me], forfeit: true)
             p.save()
             profile = p
         }
@@ -314,6 +382,11 @@ final class GameController: NSObject, ObservableObject {
         case .gauntlet:
             if over?.gauntletNext == true { gauntletRound += 1; startGauntletRound() } else { playGauntlet() }
         case .local: startGame(.local, first: 1 - battle.first, designs: [profile.castle, profile.castle])
+        case .party:
+            if net == nil { playParty() }
+            else if isHost { hostParty() }
+            else if hostNonce == 0 { showMenu() }
+            else { over?.waiting = true }
         }
     }
 
@@ -321,10 +394,23 @@ final class GameController: NSObject, ObservableObject {
         guard phase == .aim else { return }
         if cam == .aim {
             cam = .target
-            orbitA = camSide == 0 ? Double.pi - 0.55 : 0.55
+            viewSeat = aimedSeat(camSide)
+            orbitA = battle.arena.facing(viewSeat) + (viewSeat == 0 ? 0.55 : -0.55)
             orbitH = 28; orbitR = 56
             world.hidePreview()
         } else { cam = .aim }
+        refreshHUD()
+    }
+
+    /// Four castles: aims at another castle. The cannon swings round to face it.
+    func selectTarget(_ seat: Int) {
+        let s = battle.turn
+        guard mode == .party, phase == .aim, driver == .human, battle.enemies.contains(seat), seat != aims[s].target else { return }
+        aims[s].target = seat
+        aims[s].yaw = 0
+        aimDirty = true
+        world.hidePreview()
+        sfx.play(.tick)
         refreshHUD()
     }
 
@@ -372,7 +458,7 @@ final class GameController: NSObject, ObservableObject {
         tool = .wallLow; erasing = false; builderNote = nil; lastTile = nil
         screen = .builder
         cam = .target
-        camSide = 1                       // the target camera looks at the other side's castle: ours
+        viewSeat = 0
         orbitA = 0.75; orbitH = 30; orbitR = 54; orbitR0 = 54
         world.preview(draft)
     }
@@ -466,7 +552,7 @@ final class GameController: NSObject, ObservableObject {
 
     private func startGame(_ m: Mode, seed: UInt32? = nil, me: Int = 0, first: Int = 0, round: Int = 1,
                            designs: [CastleDesign], rules: MatchRules = MatchRules(), stage: Stage? = nil,
-                           carry: Castle? = nil, friend: CastleDesign? = nil) {
+                           carry: Castle? = nil, friend: CastleDesign? = nil, arena: Arena = .duel) {
         mode = m
         friendDesign = friend
         finale = false
@@ -475,12 +561,13 @@ final class GameController: NSObject, ObservableObject {
         self.stage = stage
         oppGone = false; wantAgain = false; oppAgain = false; pendingShot = nil
         flight = nil; plan = nil; remoteAim = nil; ts = 1; slowT = 0
-        battle = Battle(seed: seed ?? UInt32.random(in: 0...UInt32.max), first: first, designs: designs, rules: rules)
+        battle = Battle(seed: seed ?? UInt32.random(in: 0...UInt32.max), first: first, designs: designs, rules: rules, arena: arena)
         if let c = carry { battle.castles[0].adopt(c) }
         world.load(battle)
-        aims = [Aim(), Aim()]
-        lastPull = [nil, nil]
-        stats = [MatchStats(), MatchStats()]
+        let n = arena.seats
+        aims = Array(repeating: Aim(), count: n)
+        lastPull = Array(repeating: nil, count: n)
+        stats = Array(repeating: MatchStats(), count: n)
         score = 0; shotsTaken = 0; clearBonus = 0
         pull = nil; over = nil; toast = nil; confirmQuit = false
         screen = .playing
@@ -497,6 +584,12 @@ final class GameController: NSObject, ObservableObject {
             return me == 0 ? [Tx.you, them] : [them, Tx.you]
         case .local: return [Tx.red, Tx.blue]
         case .challenge: return [Tx.you, Tx.targetCastle]
+        case .party:
+            return seats.indices.map { i in
+                if i == me { return Tx.you }
+                let name = seats[i].name.isEmpty ? Tx.seatName(i) : seats[i].name
+                return seatGone.indices.contains(i) && seatGone[i] ? "\(name) (\(Tx.botTag))" : name
+            }
         }
     }
 
@@ -505,7 +598,17 @@ final class GameController: NSObject, ObservableObject {
         case .ai, .campaign, .gauntlet: return side == 0 ? .human : .computer
         case .local, .challenge: return .human
         case .online: return side == me ? .human : .remote
+        case .party:
+            if side == me { return .human }
+            let computer = !seats.indices.contains(side) || seats[side].nonce == 0 || (seatGone.indices.contains(side) && seatGone[side])
+            return computer && runsComputers ? .computer : .remote
         }
+    }
+
+    /// The castle a seat is aiming at now.
+    private func aimedSeat(_ side: Int) -> Int {
+        let t = aims.indices.contains(side) ? aims[side].target : -1
+        return t < 0 ? battle.arena.across(side) : t
     }
 
     private func ballStyle(for side: Int) -> BallStyle {
@@ -521,12 +624,17 @@ final class GameController: NSObject, ObservableObject {
         plan = nil; remoteAim = nil; pull = nil
         megaArmed = false; ammo = .standard; skipped = false
         cam = .aim; camSide = s
+        if mode == .party, !battle.enemies.contains(aimedSeat(s)) {
+            let across = battle.arena.across(s)
+            aims[s].target = battle.enemies.contains(across) ? across : battle.enemies.first ?? across
+            aims[s].yaw = 0
+        }
         ghost = driver == .human ? lastPull[s] : nil
         world.showTarget(battle.goldTarget())
         world.showPickup(battle.pickup)
         turnT = K.turnSeconds
         // Shot clock: only where a person on the other side is waiting.
-        timeLeft = driver == .human && (mode == .online || mode == .local) && !autoPlay ? Int(K.turnSeconds) : nil
+        timeLeft = driver == .human && (mode == .online || mode == .local || partyOnline) && !autoPlay ? Int(K.turnSeconds) : nil
         refreshHUD()
         switch driver {
         case .computer: planComputerShot(side: s, difficulty: aiLevel)
@@ -544,11 +652,13 @@ final class GameController: NSObject, ObservableObject {
 
     private func fire() {
         guard phase == .aim, !oppGone else { return }
-        let s = battle.turn, l = Ballistics.launch(side: s, aim: aims[s])
+        let s = battle.turn, l = Ballistics.launch(battle.arena, side: s, aim: aims[s])
         let mega = megaArmed && battle.charge[s] >= 1
         let special = !mega && battle.stock[s][ammo.rawValue] > 0 ? ammo : Ammo.standard
-        if mode == .online && driver == .human {
-            net?.send(NetMessage(t: "shot", round: round, k: battle.shot, p: bits(l.p0), v: bits(l.v0), yaw: aims[s].yaw, power: aims[s].power, mega: mega, ammo: special.rawValue), reliable: true)
+        if (mode == .online && driver == .human) || (partyOnline && driver != .remote) {
+            var m = NetMessage(t: "shot", round: round, k: battle.shot, p: bits(l.p0), v: bits(l.v0), yaw: aims[s].yaw, power: aims[s].power, mega: mega, ammo: special.rawValue)
+            if mode == .party { m.seat = s; m.first = aims[s].target }
+            net?.send(m, reliable: true)
         }
         launch(side: s, p0: l.p0, v0: l.v0, d: l.d, ammo: special, mega: mega)
     }
@@ -560,7 +670,8 @@ final class GameController: NSObject, ObservableObject {
         ts = 1
         cam = .follow
         let h = SIMD3<Float>(Float(v0.x), 0, Float(v0.z))
-        ballDir = simd_length_squared(h) > 1e-8 ? simd_normalize(h) : SIMD3(side == 0 ? 1 : -1, 0, 0)
+        let fw = battle.arena.forward(side)
+        ballDir = simd_length_squared(h) > 1e-8 ? simd_normalize(h) : SIMD3(Float(fw.x), 0, Float(fw.z))
         world.hidePreview()
         world.fireBall(from: p0, dir: d, side: side, style: ballStyle(for: side), ammo: f.res.ammo, mega: f.res.mega)
         sfx.play(.fire)
@@ -577,10 +688,13 @@ final class GameController: NSObject, ObservableObject {
         let out = battle.apply(res)
         world.showImpact(res, outcome: out)
         world.showTarget(nil)
-        for i in 0..<2 { world.setShield(i, on: battle.shield[i]) }
+        for i in battle.castles.indices { world.setShield(i, on: battle.shield[i]) }
         if out.pickup != nil && !f.popped { world.popPickup() }
         let any = out.damage.contains { $0.cells > 0 }
-        let enemy = 1 - f.side
+        // The enemy this shot hurt most, hearts first; with none hurt, the one it was aimed at.
+        let foes = battle.castles.indices.filter { $0 != f.side }
+        let enemy = foes.max { (out.damage[$0].heart, out.damage[$0].cells) < (out.damage[$1].heart, out.damage[$1].cells) }
+            .flatMap { out.damage[$0].cells > 0 || !out.damage[$0].crack.isEmpty ? $0 : nil } ?? aimedSeat(f.side)
         let dealt = out.damage[enemy].cells > 0 ? max(1, Int((Double(out.damage[enemy].cells) / Double(battle.castles[enemy].total) * 100).rounded())) : 0
         stats[f.side].shots += 1
         if dealt > 0 { stats[f.side].hits += 1; stats[f.side].bestHit = max(stats[f.side].bestHit, dealt) }
@@ -595,7 +709,7 @@ final class GameController: NSObject, ObservableObject {
         var msg = Tx.miss
         switch res.kind {
         case .out: break
-        case .water: msg = abs(res.pos.x) < K.river ? Tx.water : Tx.moat
+        case .water: msg = battle.arena.isWater(res.pos.x, res.pos.z) ? Tx.water : Tx.moat
         case .ground, .castle:
             sfx.play(any ? .hit : .thud)
             shake = any ? (res.mega ? 1.4 : 0.9) : 0.3
@@ -614,11 +728,12 @@ final class GameController: NSObject, ObservableObject {
         }
         if dealt == 0, out.damage[f.side].cells == 0, let k = out.pickup { msg = Tx.grabbed(k) }
         if res.crit { sfx.play(.crit) }
-        for s in 0..<2 where chargeBefore[s] < 1 && battle.charge[s] >= 1 && driverOf(s) == .human && (mode != .challenge || s == 0) { sfx.play(.charged) }
+        for s in battle.castles.indices where chargeBefore[s] < 1 && battle.charge[s] >= 1 && driverOf(s) == .human && (mode != .challenge || s == 0) { sfx.play(.charged) }
         show(toast: msg)
         impactP = res.pos.f
         let h = SIMD3<Float>(Float(res.vel.x), 0, Float(res.vel.z))
-        impactDir = simd_length_squared(h) > 1e-8 ? simd_normalize(h) : SIMD3(f.side == 0 ? 1 : -1, 0, 0)
+        let fwd = battle.arena.forward(f.side)
+        impactDir = simd_length_squared(h) > 1e-8 ? simd_normalize(h) : SIMD3(Float(fwd.x), 0, Float(fwd.z))
         impactA = 0
         cam = res.kind == .out ? .aim : .impact
         phase = .impact
@@ -632,7 +747,11 @@ final class GameController: NSObject, ObservableObject {
     /// The shot clock ran out: the turn passes without a shot.
     private func skipTurn(send: Bool) {
         guard phase == .aim else { return }
-        if send && mode == .online { net?.send(NetMessage(t: "skip", round: round, k: battle.shot), reliable: true) }
+        if send && (mode == .online || partyOnline) {
+            var m = NetMessage(t: "skip", round: round, k: battle.shot)
+            if mode == .party { m.seat = battle.turn }
+            net?.send(m, reliable: true)
+        }
         battle.forfeitTurn()
         pull = nil; timeLeft = nil; megaArmed = false; ammo = .standard; skipped = true
         world.hidePreview()
@@ -653,7 +772,8 @@ final class GameController: NSObject, ObservableObject {
             beginTurn()
             return
         }
-        if let loser = battle.loser() { gameOver(winner: 1 - loser); return }
+        if mode == .party { noteEliminations() }
+        if let w = battle.winner() { gameOver(winner: w); return }
         finale = false
         battle.advance()
         beginTurn()
@@ -664,11 +784,38 @@ final class GameController: NSObject, ObservableObject {
         }
     }
 
+    /// Four castles: announces every heart that broke this turn and books the player's place if theirs did.
+    private func noteEliminations() {
+        let nm = names()
+        for i in battle.castles.indices where battle.castles[i].heartLost && !outOrder.contains(i) {
+            outOrder.append(i)
+            let place = battle.castles.count - outOrder.count + 1
+            if i == me {
+                show(toast: Tx.youOut(place))
+                sfx.play(.lose)
+                bookParty(place: place)
+            } else {
+                show(toast: Tx.seatOut(nm[i], place))
+            }
+        }
+    }
+
+    private func bookParty(place: Int) {
+        guard partyReward == nil, me < battle.castles.count else { return }
+        var updated = profile
+        let own = battle.castles[me]
+        let facts = MatchFacts(heartPct: own.heartPct, castlePct: own.pct, decoysFooled: own.decoyRevealed.filter { $0 }.count)
+        partyReward = updated.record(won: place == 1, mode: .party(place: place, online: net != nil), stats: stats[me], facts: facts)
+        updated.save()
+        profile = updated
+    }
+
     private func enterOverState(lookingAt winner: Int) {
         phase = .over
         cam = .target
         camSide = winner
-        orbitA = winner == 0 ? Double.pi - 0.55 : 0.55
+        viewSeat = mode == .party ? outOrder.last ?? battle.arena.across(winner) : battle.arena.across(winner)
+        orbitA = battle.arena.facing(viewSeat) + (viewSeat == 0 ? 0.55 : -0.55)
         orbitH = 30; orbitR = 60
         pull = nil; timeLeft = nil; megaArmed = false; ammo = .standard; flight = nil; confirmQuit = false
         world.hidePreview()
@@ -709,6 +856,16 @@ final class GameController: NSObject, ObservableObject {
     private func gameOver(winner: Int, forfeit: Bool = false) {
         enterOverState(lookingAt: winner)
         let nm = names()
+        if mode == .party {
+            if winner == me { bookParty(place: 1) }
+            let order = ([winner] + outOrder.reversed()).filter { $0 >= 0 && $0 < nm.count }
+            var info = OverInfo(title: winner == me ? Tx.won : Tx.sideWon(nm[winner]), detail: Tx.placements(order.map { nm[$0] }))
+            info.reward = partyReward
+            info.stats = stats[me]
+            sfx.play(winner == me ? .win : .lose)
+            present(info)
+            return
+        }
         let p = battle.castles.map { Int(($0.pct * 100 + 1e-9).rounded(.down)) }
         var info = OverInfo(title: "", detail: forfeit ? Tx.forfeitWin : Tx.heartFell(nm[1 - winner]) + " " + Tx.standing(nm[0], p[0], nm[1], p[1]))
         if let mine = mySide {
@@ -800,12 +957,12 @@ final class GameController: NSObject, ObservableObject {
             default:
                 switch driver {
                 case .human: h.turnText = mode == .local ? Tx.turnOf(h.names[s]) : mode == .challenge ? Tx.dailySiege : Tx.yourTurn
-                case .computer: h.turnText = Tx.computerAiming
-                case .remote: h.turnText = Tx.opponentAiming
+                case .computer: h.turnText = mode == .party ? Tx.turnOf(h.names[s]) : Tx.computerAiming
+                case .remote: h.turnText = mode == .party ? Tx.turnOf(h.names[s]) : Tx.opponentAiming
                 }
             }
         }
-        let sg: Double = s == 0 ? 1 : -1, f = wind.x * sg, r = wind.z * sg
+        let hd = Ballistics.heading(battle.arena, side: s, aim: aims[s]), f = wind.x * cos(hd) + wind.z * sin(hd), r = wind.z * cos(hd) - wind.x * sin(hd)
         h.windAngle = atan2(r, f) * 180 / .pi
         h.windPower = Int(((f * f + r * r).squareRoot() / (K.wind * 1.414) * 10).rounded())
         let humanAiming = phase == .aim && driver == .human && !oppGone && !autoPlay
@@ -817,6 +974,12 @@ final class GameController: NSObject, ObservableObject {
         h.megaReady = humanAiming && battle.charge[s] >= 1
         h.stock = humanAiming ? battle.stock[s] : [0, 0, 0, 0]
         h.hasTarget = phase == .aim && battle.goldTarget() != nil
+        h.out = battle.castles.map { $0.heartLost }
+        if mode == .party {
+            h.me = me
+            h.targets = humanAiming ? battle.enemies : []
+            h.target = aimedSeat(s)
+        }
         if mode == .challenge {
             h.score = score
             h.shotsTaken = min(Challenge.shots, shotsTaken + (phase == .flight || phase == .impact ? 1 : 0))
@@ -831,7 +994,7 @@ final class GameController: NSObject, ObservableObject {
     func drag(start: CGPoint, location: CGPoint) {
         if cam == .target {
             if let last = lastDrag {
-                orbitA += Double(location.x - last.x) * 0.008 * (camSide == 0 ? 1 : -1) * -1
+                orbitA += Double(location.x - last.x) * 0.008 * (viewSeat == 0 ? 1 : -1)
                 orbitH = min(70, max(6, orbitH + Double(location.y - last.y) * 0.14))
             }
             lastDrag = location
@@ -844,7 +1007,7 @@ final class GameController: NSObject, ObservableObject {
         let yaw = min(K.maxYaw, max(-K.maxYaw, -dx * 0.14))
         let armed = power >= 6
         let s = battle.turn
-        if armed { aims[s] = Aim(yaw: yaw, power: power); aimDirty = true; showPreview(side: s) } else { world.hidePreview() }
+        if armed { aims[s] = Aim(yaw: yaw, power: power, target: aims[s].target); aimDirty = true; showPreview(side: s) } else { world.hidePreview() }
         pull = Pull(start: start, current: location, yaw: yaw, power: power, armed: armed)
     }
 
@@ -867,8 +1030,8 @@ final class GameController: NSObject, ObservableObject {
 
     /// Dotted start of the flight. Beginners playing an easy computer see more of it.
     private func showPreview(side s: Int) {
-        let l = Ballistics.launch(side: s, aim: aims[s])
-        let dots = (mode == .ai || mode == .campaign || mode == .gauntlet) && aiLevel == .kolay ? 36 : 20
+        let l = Ballistics.launch(battle.arena, side: s, aim: aims[s])
+        let dots = (mode == .ai || mode == .campaign || mode == .gauntlet || mode == .party) && aiLevel == .kolay ? 36 : 20
         var x = l.p0.x, y = l.p0.y, z = l.p0.z, vx = l.v0.x, vy = l.v0.y, vz = l.v0.z
         var pts: [SIMD3<Float>] = []
         for i in 1...(dots * 9) {
@@ -889,19 +1052,123 @@ final class GameController: NSObject, ObservableObject {
         net = nil
         round = 0; isHost = false; wantAgain = false; oppAgain = false; pendingShot = nil; oppGone = false
         rival = nil
+        partyPeers = [:]; hostNonce = 0
     }
 
     private func netConnected() {
         oppGone = false
         round = 0
-        myNonce = UInt32.random(in: 1...UInt32.max)
         lobby.busy = true
-        lobby.status = Tx.opponentFound
+        if lobby.isParty {
+            partyLobbyChanged()
+        } else {
+            myNonce = UInt32.random(in: 1...UInt32.max)
+            lobby.status = Tx.opponentFound
+        }
+        sendHello()
+    }
+
+    private func sendHello() {
         net?.send(NetMessage(t: "hello", nonce: myNonce, name: profile.name, trophies: profile.trophies, level: profile.level, design: profile.castle.encoded,
                              rules: K.rulesVersion), reliable: true)
     }
 
+    /// Four-castle lobby: someone joined or left. The nearby host starts by hand; on Game Center the
+    /// host (highest nonce) starts once everyone matched has said hello.
+    private func partyLobbyChanged() {
+        guard lobby.isParty, screen == .lobby, let net else { return }
+        if lobby.kind == .partyJoin {
+            lobby.status = Tx.waitingHost
+            return
+        }
+        lobby.players = partyPeers.count + 1
+        lobby.status = Tx.partyPlayers(lobby.players)
+        if lobby.kind == .partyHost {
+            lobby.canStart = !partyPeers.isEmpty
+            lobby.busy = partyPeers.isEmpty
+        } else if net.peerCount > 0, partyPeers.count >= net.peerCount {
+            isHost = partyPeers.keys.allSatisfy { $0 < myNonce }
+            if isHost && round == 0 { hostParty() }
+        }
+    }
+
+    /// The nearby host's Start button.
+    func startPartyNow() {
+        guard lobby.kind == .partyHost, !partyPeers.isEmpty else { return }
+        (net as? NearbyTransport)?.close()
+        hostParty()
+    }
+
+    /// The host seats everyone (itself first, computers in the empty seats) and starts a round.
+    private func hostParty() {
+        isHost = true
+        round += 1
+        if round == 1 {
+            seats = [SeatInfo(nonce: myNonce, name: profile.name, level: profile.level, design: profile.castle.encoded)]
+            seats += partyPeers.values.sorted { $0.nonce < $1.nonce }.prefix(3)
+            var picks = Presets.all.shuffled()
+            while seats.count < 4 { seats.append(SeatInfo(nonce: 0, name: Tx.seatName(seats.count), level: 1, design: picks.removeFirst().encoded)) }
+        }
+        let seed = UInt32.random(in: 0...UInt32.max), first = Int.random(in: 0..<4)
+        var m = NetMessage(t: "start", nonce: myNonce, seed: seed, round: round, first: first)
+        m.seats = seats
+        net?.send(m, reliable: true)
+        let gone = seatGone
+        startParty(seed: seed, me: 0, first: first, round: round)
+        if gone.count == seats.count { seatGone = gone }
+    }
+
+    /// Every device says it is still there; the host takes over the seats of players who go quiet,
+    /// and the others end the match if the host does.
+    private func heartbeat(_ dt: Double) {
+        clock += dt
+        pingT -= dt
+        if pingT <= 0 {
+            pingT = 1.5
+            net?.send(NetMessage(t: "ping", nonce: myNonce), reliable: false)
+        }
+        guard phase != .over, phase != .menu else { return }
+        if isHost {
+            for i in seats.indices where i != me && seats[i].nonce != 0 && !seatGone[i] && clock - (lastSeen[seats[i].nonce] ?? clock) > 7 {
+                seatLeft(i)
+            }
+        } else if hostNonce != 0, clock - (lastSeen[hostNonce] ?? clock) > 7 {
+            hostGone()
+        }
+    }
+
+    private func seatLeft(_ i: Int) {
+        guard seats.indices.contains(i), !seatGone[i] else { return }
+        seatGone[i] = true
+        var m = NetMessage(t: "bot")
+        m.seat = i
+        net?.send(m, reliable: true)
+        show(toast: Tx.playerLeft(seats[i].name.isEmpty ? Tx.seatName(i) : seats[i].name))
+        if phase == .aim, battle.turn == i, isHost {
+            pendingShot = nil
+            beginTurn()
+        } else { refreshHUD() }
+    }
+
+    private func hostGone() {
+        guard mode == .party, phase != .over else { return }
+        hostNonce = 0
+        enterOverState(lookingAt: me)
+        var info = OverInfo(title: Tx.gameOver, detail: Tx.hostLeft)
+        info.reward = partyReward
+        present(info)
+    }
+
     private func netLost() {
+        if lobby.isParty {
+            if screen == .lobby {
+                if lobby.kind == .partyJoin || net?.peerCount == 0 { lobby.status = Tx.connectionLost; lobby.busy = false }
+                return
+            }
+            // Online four-castle match: a joiner has lost the host; the host plays on against computers.
+            if !isHost { hostGone() } else { for i in seats.indices where i != me && seats[i].nonce != 0 { seatLeft(i) } }
+            return
+        }
         oppGone = true
         if screen == .lobby {
             lobby.status = Tx.connectionLost
@@ -929,6 +1196,8 @@ final class GameController: NSObject, ObservableObject {
     }
 
     private func netMessage(_ m: NetMessage) {
+        if let n = m.nonce { lastSeen[n] = clock }
+        if lobby.isParty { partyMessage(m); return }
         switch m.t {
         case "hello":
             guard let n = m.nonce else { return }
@@ -964,9 +1233,47 @@ final class GameController: NSObject, ObservableObject {
         }
     }
 
+    private func partyMessage(_ m: NetMessage) {
+        switch m.t {
+        case "hello":
+            guard let n = m.nonce, n != myNonce else { return }
+            guard m.rules == K.rulesVersion else { return }
+            if partyPeers[n] == nil && partyPeers.count < 3 && round == 0 {
+                partyPeers[n] = SeatInfo(nonce: n, name: Profile.cleanName(m.name ?? ""), level: min(999, max(1, m.level ?? 1)),
+                                         design: (CastleDesign(encoded: m.design ?? []) ?? .classic).encoded)
+                sendHello()
+            }
+            partyLobbyChanged()
+        case "start":
+            guard !isHost, let seed = m.seed, let r = m.round, let first = m.first, let list = m.seats, list.count == 4, first >= 0, first < 4,
+                  let mine = list.firstIndex(where: { $0.nonce == myNonce }) else { return }
+            hostNonce = m.nonce ?? 0
+            seats = list.map { SeatInfo(nonce: $0.nonce, name: Profile.cleanName($0.name), level: min(999, max(1, $0.level)),
+                                        design: (CastleDesign(encoded: $0.design) ?? .classic).encoded) }
+            let gone = seatGone
+            startParty(seed: seed, me: mine, first: first, round: r)
+            if gone.count == seats.count { seatGone = gone }
+        case "aim":
+            guard mode == .party, phase == .aim, driver == .remote, m.seat == battle.turn, let y = m.yaw, let p = m.power, y.isFinite, p.isFinite else { return }
+            remoteAim = Aim(yaw: min(K.maxYaw, max(-K.maxYaw, y)), power: min(100, max(0, p)), target: m.first ?? -1)
+            if let t = m.first, battle.enemies.contains(t) { aims[battle.turn].target = t }
+        case "shot", "skip":
+            guard mode == .party else { return }
+            pendingShot = m
+            checkRemote()
+        case "bot":
+            guard let i = m.seat, seatGone.indices.contains(i), !seatGone[i] else { return }
+            seatGone[i] = true
+            show(toast: Tx.playerLeft(seats[i].name.isEmpty ? Tx.seatName(i) : seats[i].name))
+            refreshHUD()
+        default: break
+        }
+    }
+
     /// Plays the opponent's move (a shot or a timed-out turn) once it has arrived and it is their turn here too.
     private func checkRemote() {
-        guard mode == .online, phase == .aim, driver == .remote, let m = pendingShot, m.round == round, m.k == battle.shot else { return }
+        guard mode == .online || partyOnline, phase == .aim, driver == .remote, let m = pendingShot, m.round == round, m.k == battle.shot else { return }
+        if mode == .party, m.seat != battle.turn { return }
         if m.t == "skip" { pendingShot = nil; skipTurn(send: false); return }
         guard let pb = m.p, let vb = m.v, pb.count == 3, vb.count == 3 else { return }
         let p0 = Vec3(x: Double(bitPattern: pb[0]), y: Double(bitPattern: pb[1]), z: Double(bitPattern: pb[2]))
@@ -975,7 +1282,10 @@ final class GameController: NSObject, ObservableObject {
         guard [p0.x, p0.y, p0.z, sp].allSatisfy({ $0.isFinite }), sp >= 1, sp <= K.vMax + 1 else { return }
         pendingShot = nil
         let s = battle.turn
-        if let y = m.yaw, let p = m.power, y.isFinite, p.isFinite { aims[s] = Aim(yaw: min(K.maxYaw, max(-K.maxYaw, y)), power: min(100, max(0, p))) }
+        if let y = m.yaw, let p = m.power, y.isFinite, p.isFinite {
+            let t = mode == .party && battle.enemies.contains(m.first ?? -1) ? m.first! : aims[s].target
+            aims[s] = Aim(yaw: min(K.maxYaw, max(-K.maxYaw, y)), power: min(100, max(0, p)), target: t)
+        }
         launch(side: s, p0: p0, v0: v0, d: Vec3(x: v0.x / sp, y: v0.y / sp, z: v0.z / sp), ammo: Ammo(rawValue: m.ammo ?? 0) ?? .standard, mega: m.mega == true)
     }
 
@@ -989,13 +1299,16 @@ final class GameController: NSObject, ObservableObject {
     }
 
     private func update(_ dt: Double) {
-        for s in 0..<2 { world.cannons[s].pose(yaw: aims[s].yaw, dt: Float(dt)) }
+        for s in aims.indices where s < world.cannons.count {
+            world.cannons[s].pose(heading: Ballistics.heading(battle.arena, side: s, aim: aims[s]), yaw: aims[s].yaw, dt: Float(dt))
+        }
+        if partyOnline { heartbeat(dt) }
         if phase == .aim {
             let s = battle.turn
             if var p = plan {
                 p.t += dt
                 let k = min(1, p.t / 1.5), e = k * k * (3 - 2 * k)
-                aims[s] = Aim(yaw: p.from.yaw + (p.to.yaw - p.from.yaw) * e, power: p.from.power + (p.to.power - p.from.power) * e)
+                aims[s] = Aim(yaw: p.from.yaw + (p.to.yaw - p.from.yaw) * e, power: p.from.power + (p.to.power - p.from.power) * e, target: p.to.target)
                 plan = p
                 if p.t > 1.9 { plan = nil; fire() }
             } else if driver == .remote, let r = remoteAim {
@@ -1003,11 +1316,13 @@ final class GameController: NSObject, ObservableObject {
                 aims[s].yaw += (r.yaw - aims[s].yaw) * k
                 aims[s].power += (r.power - aims[s].power) * k
             } else if driver == .human {
-                if mode == .online {
+                if mode == .online || partyOnline {
                     aimSendT -= dt
                     if aimDirty && aimSendT <= 0 {
                         aimDirty = false; aimSendT = 0.14
-                        net?.send(NetMessage(t: "aim", yaw: aims[s].yaw, power: aims[s].power), reliable: false)
+                        var m = NetMessage(t: "aim", yaw: aims[s].yaw, power: aims[s].power)
+                        if mode == .party { m.seat = s; m.first = aims[s].target }
+                        net?.send(m, reliable: false)
                     }
                 }
                 if timeLeft != nil && !confirmQuit { runShotClock(dt) }
@@ -1060,6 +1375,14 @@ final class GameController: NSObject, ObservableObject {
         if let p = pull, p.armed { dragEnded() } else { skipTurn(send: true) }
     }
 
+    /// True when a point is above, or just beside, any castle.
+    private func overCastle(_ p: SIMD3<Float>) -> Bool {
+        battle.castles.contains { c in
+            let l = c.local(Double(p.x), Double(p.z))
+            return l.x > -5 && l.x < Double(K.gw) + 3 && l.z > -3 && l.z < Double(K.gd) + 3
+        }
+    }
+
     private func updateCamera(_ dt: Double) {
         var tPos = SIMD3<Float>(0, 0, 0), tLook = SIMD3<Float>(0, 0, 0)
         var k = 3.0
@@ -1071,8 +1394,9 @@ final class GameController: NSObject, ObservableObject {
             tLook = SIMD3(0, 7, 0)
             k = 1.6
         case .aim:
-            let sg: Float = camSide == 0 ? 1 : -1, y = Float(aims[camSide].yaw * .pi / 180)
-            let h = SIMD3<Float>(sg * cos(y), 0, sg * sin(y)), pv = Ballistics.pivot(camSide).f
+            let side = min(camSide, aims.count - 1)
+            let y = Float(Ballistics.heading(battle.arena, side: side, aim: aims[side]) + aims[side].yaw * .pi / 180)
+            let h = SIMD3<Float>(cos(y), 0, sin(y)), pv = battle.arena.pivot(side).f
             tPos = pv - h * 7.5 + SIMD3(0, 3.6, 0)
             tLook = pv + h * 40
             tLook.y = 4.2
@@ -1080,9 +1404,9 @@ final class GameController: NSObject, ObservableObject {
             wantFov = 46
         case .target:
             if phase == .over { orbitA += dt * 0.12 }
-            let ex = (camSide == 0 ? 1 : -1) * Float(K.front + Double(K.gw) / 2)
-            tPos = SIMD3(ex + Float(cos(orbitA) * orbitR), Float(orbitH), Float(sin(orbitA) * orbitR))
-            tLook = SIMD3(ex, 7, 0)
+            let c = battle.arena.castleCenter(min(viewSeat, battle.castles.count - 1)).f
+            tPos = SIMD3(c.x + Float(cos(orbitA) * orbitR), Float(orbitH), c.z + Float(sin(orbitA) * orbitR))
+            tLook = SIMD3(c.x, 7, c.z)
             if screen == .builder {
                 // The grid covers the left of the screen, so frame the castle in the right half.
                 let f = simd_normalize(SIMD3<Float>(tLook.x - tPos.x, 0, tLook.z - tPos.z))
@@ -1095,13 +1419,13 @@ final class GameController: NSObject, ObservableObject {
             tPos = b - d * 13 + SIMD3(0, 5, 0) + SIMD3(-d.z, 0, d.x) * 3
             tLook = b + d * 6
             // stay above the walls instead of flying through them
-            if abs(tPos.x) > Float(K.front) - 5 && abs(tPos.x) < Float(K.xEdge) + 3 && abs(tPos.z) < Float(K.gd) / 2 + 3 { tPos.y = max(tPos.y, 25) }
+            if overCastle(tPos) { tPos.y = max(tPos.y, 25) }
             k = 7
         case .finale:
             let b = world.ball.simdPosition, d = ballDir
             tPos = b + SIMD3(-d.z, 0, d.x) * 15 - d * 5 + SIMD3(0, 4, 0)
             tLook = b + d * 2
-            if abs(tPos.x) > Float(K.front) - 5 && abs(tPos.x) < Float(K.xEdge) + 3 && abs(tPos.z) < Float(K.gd) / 2 + 3 { tPos.y = max(tPos.y, 22) }
+            if overCastle(tPos) { tPos.y = max(tPos.y, 22) }
             k = 5
             wantFov = 38
         case .impact:

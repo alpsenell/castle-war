@@ -14,6 +14,7 @@ enum K {
     static let front = 40.0                        // |x| of each castle's front face
     static let xEdge = front + Double(gw)          // |x| of the back face
     static let river = 8.0
+    static let lake = 13.0                           // radius of the lake in the middle of a four-castle arena
     static let platX = 31.0, platHalf = 3.0, platTop = 2.4
     static let pivotY = platTop + 1.25, muzzle = 2.6
     static let maxYaw = 35.0
@@ -27,7 +28,7 @@ enum K {
     static let shieldFactor = 0.6                    // blast radius against a shielded castle
     static let repairCells = 110
     static let heartReach = 0.5                      // the heart only breaks this much closer to a blast than stone does
-    static let rulesVersion = 4                      // bumped whenever an online match would play out differently
+    static let rulesVersion = 5                      // bumped whenever an online match would play out differently
     static let cells = gw * gh * gd
 }
 
@@ -47,10 +48,12 @@ struct Vec3: Equatable {
     var length: Double { (x * x + y * y + z * z).squareRoot() }
 }
 
-/// Direction in degrees (positive = right of the shooter) and power 0...100.
+/// Direction in degrees (positive = right of the shooter) and power 0...100, relative to the
+/// castle aimed at. `target` -1 means the castle across the field.
 struct Aim: Equatable {
     var yaw = 0.0
     var power = 50.0
+    var target = -1
 }
 
 struct Block {
@@ -163,6 +166,50 @@ struct ShotOutcome {
 }
 
 @inline(__always) func cellIndex(_ x: Int, _ y: Int, _ z: Int) -> Int { (y * K.gw + x) * K.gd + z }
+
+// MARK: - Arena
+
+/// Where the castles stand: two facing across the river, or four around a lake.
+/// Seat 0 is always west of the middle; the others follow round the field.
+struct Arena: Equatable {
+    let seats: Int
+    static let duel = Arena(seats: 2), party = Arena(seats: 4)
+
+    /// Unit vector from a seat toward the middle of the field, kept exact so a duel plays out
+    /// the same as it always has.
+    func forward(_ seat: Int) -> (x: Double, z: Double) {
+        let quarter = seats == 2 ? seat * 2 : seat
+        return [(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)][quarter % 4]
+    }
+    /// Unit vector to the right of a castle's front, seen from behind it.
+    func right(_ seat: Int) -> (x: Double, z: Double) { let f = forward(seat); return (-f.z, f.x) }
+
+    /// The world direction (radians, from +x toward +z) a seat faces.
+    func facing(_ seat: Int) -> Double { let f = forward(seat); return atan2(f.z, f.x) }
+
+    func pivot(_ seat: Int) -> Vec3 { let f = forward(seat); return Vec3(x: -K.platX * f.x, y: K.pivotY, z: -K.platX * f.z) }
+
+    /// Centre of a seat's castle on the ground.
+    func castleCenter(_ seat: Int) -> Vec3 {
+        let f = forward(seat), d = K.front + Double(K.gw) / 2
+        return Vec3(x: -d * f.x, y: 0, z: -d * f.z)
+    }
+
+    /// The direction a cannon points at aim zero when it targets another castle.
+    func heading(from seat: Int, to target: Int) -> Double {
+        guard target != seat, target >= 0, target < seats else { return facing(seat) }
+        if seats == 2 { return facing(seat) }
+        let p = pivot(seat), c = castleCenter(target)
+        return atan2(c.z - p.z, c.x - p.x)
+    }
+
+    /// The castle a seat aims at before it picks one: the one across the field.
+    func across(_ seat: Int) -> Int { seats == 2 ? 1 - seat : (seat + 2) % seats }
+
+    func isWater(_ x: Double, _ z: Double) -> Bool {
+        seats == 2 ? x > -K.river && x < K.river : x * x + z * z < K.lake * K.lake
+    }
+}
 
 // MARK: - Castle designs
 
@@ -630,9 +677,9 @@ private func tile(_ plan: Plan) -> (blocks: [Block], cellBlock: [Int]) {
 
 final class Castle {
     let side: Int
-    /// +1 for the left castle, -1 for the right one, which is the same design turned to face the other way.
-    let s: Double
-    let x0: Double
+    /// The castle's frame: its back corner on the ground, the way its front faces (local x) and its right (local z).
+    let origin: Vec3
+    let fx: Double, fz: Double, rx: Double, rz: Double
     private(set) var blocks: [Block]
     let cellBlock: [Int]
     let decor: [DecorSpec]
@@ -648,10 +695,11 @@ final class Castle {
     let moats: [(x: Int, z: Int)]
     let heartKind: HeartKind
 
-    init(side: Int, design: CastleDesign) {
+    init(side: Int, design: CastleDesign, arena: Arena = .duel) {
         self.side = side
-        s = side == 0 ? 1 : -1
-        x0 = side == 0 ? -K.xEdge : K.xEdge
+        let f = arena.forward(side), r = arena.right(side)
+        fx = f.x; fz = f.z; rx = r.x; rz = r.z
+        origin = Vec3(x: -K.xEdge * f.x, y: 0, z: -K.xEdge * f.z)
         let plan = Plan(design)
         let t = tile(plan)
         blocks = t.blocks
@@ -717,8 +765,17 @@ final class Castle {
     }
 
     /// True when a world point on the ground lies in one of this castle's moats.
+    /// A world point in grid units: x from the back toward the front, z from the owner's left.
+    func local(_ px: Double, _ pz: Double) -> (x: Double, z: Double) {
+        let dx = px - origin.x, dz = pz - origin.z
+        return (dx * fx + dz * fz, dx * rx + dz * rz + Double(K.gd) / 2)
+    }
+
+    /// True when a castle's local x axis runs along the world x axis (seats west and east).
+    var alongWorldX: Bool { fx != 0 }
+
     func inMoat(_ px: Double, _ pz: Double) -> Bool {
-        let lx = s * (px - x0), lz = s * pz + Double(K.gd) / 2
+        let (lx, lz) = local(px, pz)
         return moats.contains { lx >= Double($0.x) && lx <= Double($0.x + 2) && lz >= Double($0.z) && lz <= Double($0.z + 2) }
     }
 
@@ -729,11 +786,12 @@ final class Castle {
     }
 
     func worldPoint(gx: Double, gy: Double, gz: Double) -> Vec3 {
-        Vec3(x: x0 + s * gx, y: gy * K.lh, z: s * (gz - Double(K.gd) / 2))
+        let w = gz - Double(K.gd) / 2
+        return Vec3(x: origin.x + gx * fx + w * rx, y: gy * K.lh, z: origin.z + gx * fz + w * rz)
     }
 
     func hit(_ px: Double, _ py: Double, _ pz: Double) -> Bool {
-        let r = K.ballR, lx = s * (px - x0), lz = s * pz + Double(K.gd) / 2
+        let r = K.ballR, (lx, lz) = local(px, pz)
         if lx < -r || lx > Double(K.gw) + r || lz < -r || lz > Double(K.gd) + r || py > Double(K.gh) * K.lh + r { return false }
         let xa = max(0, Int((lx - r).rounded(.down))), xb = min(K.gw - 1, Int((lx + r).rounded(.down)))
         let ya = max(0, Int(((py - r) / K.lh).rounded(.down))), yb = min(K.gh - 1, Int(((py + r) / K.lh).rounded(.down)))
@@ -753,7 +811,7 @@ final class Castle {
     /// Blocks removed by a blast at a world point plus everything left with nothing underneath. Does not change state.
     func damage(at c: Vec3, radius R: Double = K.blastR) -> Damage {
         var out = Damage()
-        let lx = s * (c.x - x0), lz = s * c.z + Double(K.gd) / 2
+        let (lx, lz) = local(c.x, c.z)
         if lx < -R || lx > Double(K.gw) + R || lz < -R || lz > Double(K.gd) + R { return out }
         var dead = [Bool](repeating: false, count: blocks.count)
         let r2 = R * R, h2 = r2 * K.heartReach * K.heartReach
@@ -868,31 +926,46 @@ final class Battle {
     let seed: UInt32
     let first: Int
     let rules: MatchRules
+    let arena: Arena
     private(set) var shot = 0
     let castles: [Castle]
+    /// Whose turn it is. Seats whose heart is gone are skipped.
+    private(set) var turn: Int
     /// Mega meter per side, 0...1. Fills by dealing damage and, more slowly, by taking it.
-    private(set) var charge = [0.0, 0.0]
-    /// Consecutive shots that damaged the enemy, per side.
-    private(set) var streak = [0, 0]
+    private(set) var charge: [Double]
+    /// Consecutive shots that damaged an enemy, per side.
+    private(set) var streak: [Int]
     /// Special shots left, per side, indexed by `Ammo.rawValue`.
-    private(set) var stock = [[0, 1, 1, 1], [0, 1, 1, 1]]
+    private(set) var stock: [[Int]]
     /// A shielded castle takes the next blast at reduced radius.
-    private(set) var shield = [false, false]
+    private(set) var shield: [Bool]
     private(set) var pickup: Pickup?
     private var nextSpawn = 2
     /// An aegis heart shields its castle once per match.
-    private(set) var aegisUsed = [false, false]
+    private(set) var aegisUsed: [Bool]
     /// Heart block that grew back at the start of the last turn, and on which side.
     private(set) var regrown: (side: Int, block: Int)?
 
-    init(seed: UInt32, first: Int, designs: [CastleDesign] = [.classic, .classic], rules: MatchRules = MatchRules()) {
+    init(seed: UInt32, first: Int, designs: [CastleDesign] = [.classic, .classic], rules: MatchRules = MatchRules(), arena: Arena = .duel) {
         self.seed = seed
         self.first = first
         self.rules = rules
-        castles = [Castle(side: 0, design: designs[0]), Castle(side: 1, design: designs[1])]
+        self.arena = arena
+        let n = arena.seats
+        castles = (0..<n).map { Castle(side: $0, design: designs[min($0, designs.count - 1)], arena: arena) }
+        turn = first % n
+        charge = Array(repeating: 0, count: n)
+        streak = Array(repeating: 0, count: n)
+        stock = Array(repeating: [0, 1, 1, 1], count: n)
+        shield = Array(repeating: false, count: n)
+        aegisUsed = Array(repeating: false, count: n)
     }
 
-    var turn: Int { (first + shot) % 2 }
+    /// Seats still in the match.
+    var standing: [Int] { castles.indices.filter { !castles[$0].heartLost } }
+
+    /// Every castle the side to move could shoot at.
+    var enemies: [Int] { standing.filter { $0 != turn } }
 
     func wind() -> (x: Double, z: Double) {
         var r = Mulberry32(seed ^ (UInt32(truncatingIfNeeded: shot + 1) &* 0x9E37_79B1))
@@ -902,20 +975,29 @@ final class Battle {
         return (wx, wz)
     }
 
-    /// This turn's gold target: a block on the defender's castle that is open to the sky.
+    /// This turn's gold target: a block on an enemy castle that is open to the sky.
     /// Landing a shot within `K.critRange` of it is a critical hit.
     func goldTarget() -> Vec3? {
-        let enemy = castles[1 - turn]
-        let open = enemy.blocks.filter { $0.alive && $0.y >= 2 && enemy.isOpenToSky($0) }
+        var open: [Vec3] = []
+        for e in enemies {
+            let c = castles[e]
+            for b in c.blocks where b.alive && b.y >= 2 && c.isOpenToSky(b) { open.append(c.center(of: b)) }
+        }
         guard !open.isEmpty else { return nil }
         var r = Mulberry32(seed ^ (UInt32(truncatingIfNeeded: shot + 1) &* 0x85EB_CA6B))
         _ = r.next()
-        return enemy.center(of: open[min(open.count - 1, Int(r.next() * Double(open.count)))])
+        return open[min(open.count - 1, Int(r.next() * Double(open.count)))]
     }
 
     /// Moves to the next turn (or skips the other side's, in the solo siege) and looks after the balloon.
     func advance(by n: Int = 1) {
-        shot += n
+        let count = castles.count
+        for _ in 0..<n {
+            shot += 1
+            var next = (turn + 1) % count
+            while next != turn && castles[next].heartLost { next = (next + 1) % count }
+            turn = next
+        }
         regrown = castles[turn].regrowHeart().map { (turn, $0) }
         guard rules.pickups else { return }
         if let p = pickup, shot - p.born >= 4 { pickup = nil; nextSpawn = shot + 2 }
@@ -957,14 +1039,17 @@ final class Battle {
             }
             if y <= r {
                 y = r; path[path.count - 1].y = r
-                kind = (x > -K.river && x < K.river) || castles[0].inMoat(x, z) || castles[1].inMoat(x, z) ? .water : .ground
+                kind = arena.isWater(x, z) || castles.contains(where: { $0.inMoat(x, z) }) ? .water : .ground
                 break
             }
-            if castles[0].hit(x, y, z) { kind = .castle; side = 0; break }
-            if castles[1].hit(x, y, z) { kind = .castle; side = 1; break }
-            if n > 40 && y < K.platTop + r && z > -K.platHalf - r && z < K.platHalf + r {
-                let ax = abs(x)
-                if ax > K.platX - K.platHalf - r && ax < K.platX + K.platHalf + r { kind = .ground; break }
+            if let i = castles.firstIndex(where: { $0.hit(x, y, z) }) { kind = .castle; side = i; break }
+            if n > 40 && y < K.platTop + r {
+                var onPlatform = false
+                for i in castles.indices {
+                    let p = arena.pivot(i)
+                    if abs(x - p.x) < K.platHalf + r && abs(z - p.z) < K.platHalf + r { onPlatform = true; break }
+                }
+                if onPlatform { kind = .ground; break }
             }
             if x > 220 || x < -220 || z > 160 || z < -160 { kind = .out; break }
             n += 1
@@ -996,7 +1081,7 @@ final class Battle {
         res.ammo = ammo
         res.mega = mega
         res.collectedAt = collectedAt
-        if kind == .castle, side == 1 - shooter, let t = target {
+        if kind == .castle, side != shooter, let t = target {
             let dx = contact.x - t.x, dy = contact.y - t.y, dz = contact.z - t.z
             res.crit = dx * dx + dy * dy + dz * dz <= K.critRange * K.critRange
         }
@@ -1025,9 +1110,9 @@ final class Battle {
 
     /// Applies a shot: damage, shields, the mega meter, streaks, ammo and any balloon it grabbed.
     func apply(_ res: ShotResult) -> ShotOutcome {
-        let s = res.shooter, e = 1 - s
-        var out = ShotOutcome(damage: [Damage(), Damage()])
-        var struck = [false, false]
+        let s = res.shooter, n = castles.count
+        var out = ShotOutcome(damage: Array(repeating: Damage(), count: n))
+        var struck = Array(repeating: false, count: n)
         for b in res.blasts {
             for (i, c) in castles.enumerated() {
                 let d = c.damage(at: b.center, radius: b.radius * (shield[i] ? K.shieldFactor : 1))
@@ -1036,17 +1121,18 @@ final class Battle {
                 out.damage[i].add(d)
             }
         }
-        for i in 0..<2 where shield[i] && (struck[i] || (res.kind == .castle && res.side == i)) {
+        for i in 0..<n where shield[i] && (struck[i] || (res.kind == .castle && res.side == i)) {
             shield[i] = false
             out.shieldBroken = i
         }
-        for i in 0..<2 where castles[i].heartKind == .aegis && !aegisUsed[i] && out.damage[i].heart > 0 && !castles[i].heartLost {
+        for i in 0..<n where castles[i].heartKind == .aegis && !aegisUsed[i] && out.damage[i].heart > 0 && !castles[i].heartLost {
             aegisUsed[i] = true
             shield[i] = true
             out.aegis = i
         }
         if res.ammo != .standard { stock[s][res.ammo.rawValue] = max(0, stock[s][res.ammo.rawValue] - 1) }
-        let dealt = Double(out.damage[e].cells) / Double(castles[e].total)
+        var dealt = 0.0
+        for e in 0..<n where e != s { dealt += Double(out.damage[e].cells) / Double(castles[e].total) }
         if res.mega { charge[s] = 0 }
         if dealt > 0 {
             streak[s] += 1
@@ -1054,7 +1140,9 @@ final class Battle {
                 let combo = 1 + 0.2 * Double(min(streak[s] - 1, 3))
                 charge[s] = min(1, charge[s] + (dealt * 2.4 * combo + (res.crit ? 0.15 : 0)) * rules.megaRate)
             }
-            charge[e] = min(1, charge[e] + dealt * 1.5 * rules.megaRate)      // taking damage charges the defender: a way back in
+            for e in 0..<n where e != s && out.damage[e].cells > 0 {          // taking damage charges the defender: a way back in
+                charge[e] = min(1, charge[e] + Double(out.damage[e].cells) / Double(castles[e].total) * 1.5 * rules.megaRate)
+            }
         } else {
             streak[s] = 0
         }
@@ -1085,31 +1173,36 @@ final class Battle {
         return nil
     }
 
-    /// The side whose heart is gone. If one shot takes both hearts, the side that fired it loses.
-    func loser() -> Int? {
-        let lost = castles.filter { $0.heartLost }.map { $0.side }
-        if lost.count == 2 { return turn }
-        return lost.first
+    /// The last heart standing, once there is one. If a shot takes every heart left, the side
+    /// that fired it loses.
+    func winner() -> Int? {
+        let left = standing
+        if left.count == 1 { return left[0] }
+        if left.isEmpty { return castles.indices.first { $0 != turn } }
+        return nil
     }
 }
 
 // MARK: - Aiming
 
 enum Ballistics {
-    static func pivot(_ side: Int) -> Vec3 { Vec3(x: side == 0 ? -K.platX : K.platX, y: K.pivotY, z: 0) }
-
     static func speed(power: Double) -> Double { K.vMin + (K.vMax - K.vMin) * power / 100 }
 
-    /// Unit launch direction and muzzle position for an aim.
-    static func muzzle(side: Int, yaw: Double) -> (d: Vec3, p0: Vec3) {
-        let ya = yaw * .pi / 180, pit = K.pitch * .pi / 180, sg: Double = side == 0 ? 1 : -1, cp = cos(pit)
-        let d = Vec3(x: sg * cp * cos(ya), y: sin(pit), z: sg * cp * sin(ya))
-        let pv = pivot(side)
+    /// Which way a seat's cannon points at aim zero.
+    static func heading(_ arena: Arena, side: Int, aim: Aim) -> Double {
+        arena.heading(from: side, to: aim.target < 0 ? arena.across(side) : aim.target)
+    }
+
+    /// Unit launch direction and muzzle position for a yaw (degrees) off a heading (radians).
+    static func muzzle(_ arena: Arena, side: Int, heading h: Double, yaw: Double) -> (d: Vec3, p0: Vec3) {
+        let a = h + yaw * .pi / 180, pit = K.pitch * .pi / 180, cp = cos(pit)
+        let d = Vec3(x: cp * cos(a), y: sin(pit), z: cp * sin(a))
+        let pv = arena.pivot(side)
         return (d, Vec3(x: pv.x + d.x * K.muzzle, y: pv.y + d.y * K.muzzle, z: pv.z + d.z * K.muzzle))
     }
 
-    static func launch(side: Int, aim: Aim) -> (p0: Vec3, v0: Vec3, d: Vec3) {
-        let m = muzzle(side: side, yaw: aim.yaw), v = speed(power: aim.power)
+    static func launch(_ arena: Arena, side: Int, aim: Aim) -> (p0: Vec3, v0: Vec3, d: Vec3) {
+        let m = muzzle(arena, side: side, heading: heading(arena, side: side, aim: aim), yaw: aim.yaw), v = speed(power: aim.power)
         return (m.p0, Vec3(x: m.d.x * v, y: m.d.y * v, z: m.d.z * v), m.d)
     }
 }
@@ -1132,36 +1225,49 @@ enum Computer {
         var aim: Aim
         var mega = false
         var ammo = Ammo.standard
+        /// The castle it is going for.
+        var target = 0
     }
 
     private static func gauss() -> Double { (Double.random(in: 0...1) + Double.random(in: 0...1) + Double.random(in: 0...1) - 1.5) * 1.15 }
 
-    private static func solve(side: Int, target t: Vec3, wind w: (x: Double, z: Double), gravity g: Double) -> (yaw: Double, v: Double)? {
-        let pv = Ballistics.pivot(side), sg: Double = side == 0 ? 1 : -1
-        let dx = (t.x - pv.x) * sg, dz = (t.z - pv.z) * sg, d = (dx * dx + dz * dz).squareRoot()
+    private static func solve(arena: Arena, side: Int, heading h: Double, target t: Vec3, wind w: (x: Double, z: Double), gravity g: Double) -> (yaw: Double, v: Double)? {
+        let pv = arena.pivot(side), ch = cos(h), sh = sin(h)
+        func flat(_ x: Double, _ z: Double) -> (Double, Double) { let ax = x - pv.x, az = z - pv.z; return (ax * ch + az * sh, az * ch - ax * sh) }
+        let (dx, dz) = flat(t.x, t.z), d = (dx * dx + dz * dz).squareRoot()
         let yawT = atan2(dz, dx), pit = K.pitch * .pi / 180
         let den = 2 * cos(pit) * cos(pit) * (d * tan(pit) - (t.y - pv.y))
         if den <= 0 { return nil }
         var v = (g * d * d / den).squareRoot(), yaw = yawT
         for _ in 0..<10 {
-            let m = Ballistics.muzzle(side: side, yaw: yaw * 180 / .pi)
+            let m = Ballistics.muzzle(arena, side: side, heading: h, yaw: yaw * 180 / .pi)
             var x = m.p0.x, y = m.p0.y, z = m.p0.z, vx = m.d.x * v, vy = m.d.y * v, vz = m.d.z * v
             for _ in 0..<6000 {
                 vx += w.x * K.dt; vy -= g * K.dt; vz += w.z * K.dt
                 x += vx * K.dt; y += vy * K.dt; z += vz * K.dt
                 if (vy < 0 && y <= t.y) || y <= 0 { break }
             }
-            let lx = (x - pv.x) * sg, lz = (z - pv.z) * sg, dl = max(1, (lx * lx + lz * lz).squareRoot())
+            let (lx, lz) = flat(x, z), dl = max(1, (lx * lx + lz * lz).squareRoot())
             yaw += yawT - atan2(lz, lx)
             v *= (d / dl).squareRoot()
         }
         return (yaw * 180 / .pi, v)
     }
 
+    /// Picks a castle to attack. With several to choose from it leans toward the weakest heart.
+    static func pickTarget(battle: Battle, side: Int) -> Int {
+        let foes = battle.standing.filter { $0 != side }
+        guard foes.count > 1 else { return foes.first ?? battle.arena.across(side) }
+        let low = foes.map { battle.castles[$0].heartPct }.min() ?? 1
+        if low < 1, Double.random(in: 0...1) < 0.55 { return foes.filter { battle.castles[$0].heartPct == low }.randomElement()! }
+        return foes.randomElement()!
+    }
+
     static func choose(battle: Battle, side: Int, difficulty: Difficulty, wind w: (x: Double, z: Double)) -> Choice {
-        let enemy = battle.castles[1 - side]
+        let foe = pickTarget(battle: battle, side: side)
+        let enemy = battle.castles[foe]
         let alive = enemy.blocks.filter { $0.alive }
-        guard !alive.isEmpty else { return Choice(aim: Aim()) }
+        guard !alive.isEmpty else { return Choice(aim: Aim(target: foe), target: foe) }
         let mega = battle.charge[side] >= 1 && (difficulty != .kolay || Bool.random())
         var ammo = Ammo.standard
         if !mega, Double.random(in: 0...1) < difficulty.ammoChance {
@@ -1176,18 +1282,21 @@ enum Computer {
             if score > bestScore { bestScore = score; best = c }
         }
         // Sometimes go for the gold target instead; better players do it more often. A homing shot always does.
-        if ammo == .homing || Double.random(in: 0...1) < difficulty.goldChance, let t = battle.goldTarget() {
+        let center = battle.arena.castleCenter(foe)
+        if ammo == .homing || Double.random(in: 0...1) < difficulty.goldChance, let t = battle.goldTarget(),
+           (t.x - center.x) * (t.x - center.x) + (t.z - center.z) * (t.z - center.z) < 400 {
             let score = worth(enemy.damage(at: t, radius: radius * K.critBoost))
             if ammo == .homing || score > bestScore { bestScore = score; best = t }
         }
         // Going straight for the heart: the walls in front of it are what stops this.
         // It cannot tell a decoy from the heart until one breaks.
         if ammo != .homing, Double.random(in: 0...1) < difficulty.heartChance, let h = enemy.heartLookalikes.randomElement() { best = h }
-        let sol = solve(side: side, target: best, wind: w, gravity: battle.rules.gravity) ?? (yaw: 0, v: 32)
+        let heading = battle.arena.heading(from: side, to: foe)
+        let sol = solve(arena: battle.arena, side: side, heading: heading, target: best, wind: w, gravity: battle.rules.gravity) ?? (yaw: 0, v: 32)
         let v = sol.v * (1 + gauss() * difficulty.speedNoise)
         let yaw = sol.yaw + gauss() * difficulty.yawNoise
-        let aim = Aim(yaw: min(max(yaw, -K.maxYaw), K.maxYaw), power: min(max((v - K.vMin) / (K.vMax - K.vMin) * 100, 0), 100))
-        return Choice(aim: aim, mega: mega, ammo: ammo)
+        let aim = Aim(yaw: min(max(yaw, -K.maxYaw), K.maxYaw), power: min(max((v - K.vMin) / (K.vMax - K.vMin) * 100, 0), 100), target: foe)
+        return Choice(aim: aim, mega: mega, ammo: ammo, target: foe)
     }
 }
 

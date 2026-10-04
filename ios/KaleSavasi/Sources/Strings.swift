@@ -320,6 +320,7 @@ enum Tx {
             ("heart.fill", p("Her kalenin bir kalbi var. Rakibin kalbini kıran kazanır.", "Every castle guards a heart. Shatter the enemy heart to win.")),
             ("building.columns.fill", p("Kaleni kendin kur: kalbi duvarların, kulelerin arkasına sakla.", "Build your own castle: hide the heart behind walls and towers.")),
             ("flame.fill", p("Fetih Yolu'nda kalen düşene kadar sırayla kaleler gelir. Başarımlar ve kalp türleri seni bekliyor.", "In the Gauntlet, castles keep coming until yours falls. Achievements and heart types wait for you.")),
+            ("person.3.fill", p("Dört kale modunda herkes kendi için oynar: hedef düğmeleriyle saldıracağın kaleyi seç.", "In Four castles it is every castle for itself: pick which castle to attack with the target buttons.")),
             ("shield.lefthalf.filled", p("Sundurma kalbi yukarıdan korur, demir duvar iki darbe alır, hendek gülleyi yutar. Sahte kalplerle rakibi şaşırt.", "A shelter roofs the heart, iron walls take two blasts, moats swallow shots. Decoy hearts fool the enemy.")),
         ]
     }
@@ -448,4 +449,33 @@ enum Tx {
 
     // MARK: Final shot
     static var finalShot: String { p("SON ATIŞ", "FINAL SHOT") }
+
+    // MARK: Four castles
+    static var party: String { p("4 oyuncu", "4 players") }
+    static var partyTitle: String { p("Dört kale", "Four castles") }
+    static var partyPitch: String {
+        p("Herkes kendi için: dört kale bir gölün çevresinde. Son ayakta kalan kalp kazanır; boş koltuklara bilgisayar oturur.",
+          "Free-for-all: four castles around a lake. The last heart standing wins, and computers fill empty seats.")
+    }
+    static var partyComputers: String { p("3 bilgisayara karşı", "Against 3 computers") }
+    static var partyGameCenter: String { p("Game Center (2–4 kişi)", "Game Center (2–4 players)") }
+    static var partyHost: String { p("Yakında kur", "Host nearby") }
+    static var partyJoin: String { p("Yakındakine katıl", "Join nearby") }
+    static var hostWaiting: String { p("Oyuncular bekleniyor. Diğer cihazlarda Katıl'a dokunsunlar.", "Waiting for players. Ask them to tap Join on their devices.") }
+    static var joinSearching: String { p("Yakındaki kurucu aranıyor…", "Looking for a nearby host…") }
+    static func partyPlayers(_ n: Int) -> String { p("Oyuncular: \(n)/4 · gerisi bilgisayar", "Players: \(n)/4 · computers fill the rest") }
+    static var startNow: String { p("Başlat", "Start") }
+    static var waitingHost: String { p("Kurucu bekleniyor", "Waiting for the host") }
+    static var hostLeft: String { p("Kurucu ayrıldı, maç bitti.", "The host left. The match is over.") }
+    static func seatName(_ i: Int) -> String {
+        [p("Kırmızı", "Red"), p("Mavi", "Blue"), p("Yeşil", "Green"), p("Sarı", "Yellow")][i % 4]
+    }
+    static func seatOut(_ name: String, _ place: Int) -> String { p("\(name) elendi (\(place). sıra)", "\(name) is out (#\(place))") }
+    static func youOut(_ place: Int) -> String { p("Elendin! \(place). oldun", "You're out! You placed #\(place)") }
+    static func placements(_ order: [String]) -> String {
+        p("Sıralama: ", "Final order: ") + order.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: " · ")
+    }
+    static var target: String { p("Hedef", "Target") }
+    static var botTag: String { p("bilgisayar", "computer") }
+    static func playerLeft(_ name: String) -> String { p("\(name) ayrıldı, yerine bilgisayar oynuyor", "\(name) left; a computer takes over") }
 }

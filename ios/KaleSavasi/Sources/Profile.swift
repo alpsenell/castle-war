@@ -33,6 +33,8 @@ enum RewardMode {
     case computer(Difficulty)
     /// The opponent's trophy count, when they shared it.
     case online(opponent: Int?)
+    /// A four-castle match: where the player finished, 1 to 4.
+    case party(place: Int, online: Bool)
 
     var xpFactor: Double {
         switch self {
@@ -40,6 +42,7 @@ enum RewardMode {
         case .computer(.orta): return 1.0
         case .computer(.zor): return 1.4
         case .online: return 1.5
+        case .party(let place, let online): return (online ? 1.5 : 1.0) * [1.4, 1.0, 0.8, 0.6][min(3, max(0, place - 1))]
         }
     }
 
@@ -50,6 +53,10 @@ enum RewardMode {
         case .computer(.kolay): return (6, 4)
         case .computer(.orta): return (12, 8)
         case .computer(.zor): return (20, 10)
+        case .party(let place, let online):
+            let table = online ? [30, 10, -8, -15] : [12, 4, -3, -6]
+            let t = table[min(3, max(0, place - 1))]
+            return t >= 0 ? (t, 0) : (0, -t)
         case .online(let theirs):
             guard let theirs else { return (25, 20) }
             let expected = 1 / (1 + pow(10, Double(theirs - mine) / 400))
@@ -413,7 +420,9 @@ struct Profile: Codable, Equatable {
             r.missions = advanceMissions(stats: stats, won: won, siege: false, stage: stage != nil && won, day: today)
             r.xp += r.missions.count * Mission.xp
         }
-        r.trophies = won ? stake.win : -min(trophies, stake.loss)
+        if case .party(let place, _) = mode, place == 2 { r.trophies = stake.win } else {
+            r.trophies = won ? stake.win : -min(trophies, stake.loss)
+        }
         settle(&r, leagueBefore: leagueBefore)
         return r
     }

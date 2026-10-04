@@ -120,6 +120,34 @@ Three goals per day, the same for everyone, drawn from a pool of seven (win a ma
 or criticals, fire mega shots, deal 12 % with one shot, reach a streak, play the siege).
 Progress adds up across matches and the siege; each finished mission pays 40 XP.
 
+### Four castles
+
+A free-for-all for up to four players. The castles stand on the four sides of a square field
+around a round lake (a shot that lands in it splashes), each cannon in front of its own castle.
+Players take turns round the field; whoever's heart breaks is out and the turn skips them, and
+the last heart standing wins. On your turn the target buttons pick which castle to attack: the
+cannon swings round to face it and the pull aims relative to that castle. The gold target can
+sit on any enemy castle. The computer goes for the weakest heart a little over half the time
+and picks at random otherwise.
+
+| Way to play | How seats fill |
+| --- | --- |
+| Against 3 computers | You and three computer castles, at the chosen difficulty |
+| Game Center | Matchmaking for 2 to 4 players; empty seats get computers |
+| Host nearby / Join nearby | One device hosts and presses Start once at least one other player has joined (up to three); the rest are computers |
+
+Online, the host seats everyone and runs the computer castles, sending their shots like a
+player's; every device plays the match out from the same seed and shots, as in a duel. Each
+device sends a heartbeat every 1.5 s. When a player goes quiet for 7 s, a computer takes over
+their castle; when the host does, the match ends for everyone else. Nearby joiners only talk
+to the host, which passes their messages on.
+
+Finishing places pay XP (1.4× for first down to 0.6× for fourth, plus the online bonus) and
+trophies: online +30, +10, −8, −15; against computers +12, +4, −3, −6. Your place is booked the
+moment your heart breaks, so you can keep watching or leave without a penalty. Leaving earlier
+in an online match counts as the worst place still open. In computer-run tests every seat won
+about a quarter of four-castle matches, and a medium-level match took about 46 shots in total.
+
 ### Gauntlet
 
 Castle after castle until yours falls. Each round is a ready-made castle chosen from the run's
@@ -177,6 +205,7 @@ every day.
 | Daily Siege | Solo score attack, same castle for everyone each day |
 | Gauntlet | Endless run of computer castles, damage carries over |
 | Friend's castle | Computer match against a castle pasted as a code |
+| Four castles | Free-for-all for up to four: against computers, Game Center, or nearby host and join |
 | Online: nearby player | MultipeerConnectivity, same Wi-Fi or Bluetooth, no account |
 | Online: Game Center | Real-time `GKMatch` over the internet, friends or auto-match |
 
