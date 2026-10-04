@@ -10,7 +10,7 @@ enum K {
     static let grav = 12.0, dt = 1.0 / 120.0
     static let ballR = 0.7, blastR = 5.1
     static let vMin = 20.0, vMax = 42.0, pitch = 32.0
-    static let wind = 1.4, lose = 0.2
+    static let wind = 1.4
     static let front = 40.0                        // |x| of each castle's front face
     static let xEdge = front + Double(gw)          // |x| of the back face
     static let river = 8.0
@@ -26,6 +26,8 @@ enum K {
     static let pickupRange = 2.8                     // how close a shot must pass to grab a balloon
     static let shieldFactor = 0.6                    // blast radius against a shielded castle
     static let repairCells = 110
+    static let heartReach = 0.5                      // the heart only breaks this much closer to a blast than stone does
+    static let rulesVersion = 2                      // bumped whenever an online match would play out differently
     static let cells = gw * gh * gd
 }
 
@@ -56,7 +58,7 @@ struct Block {
     let x: Int, y: Int, z: Int
     let len: Int
     let dir: Int        // 1 runs along x, 2 along z
-    let mat: UInt8      // 1 stone, 2 team colour, 3 trim
+    let mat: UInt8      // 1 stone, 2 team colour, 3 trim, 4 heart
     var alive = true
     var ghost = false   // never stood: cut from the plan because nothing held it up
 }
@@ -72,7 +74,8 @@ struct Damage {
     var blast: [Int] = []
     var fall: [Int] = []
     var cells = 0
-    mutating func add(_ d: Damage) { blast += d.blast; fall += d.fall; cells += d.cells }
+    var heart = 0
+    mutating func add(_ d: Damage) { blast += d.blast; fall += d.fall; cells += d.cells; heart += d.heart }
 }
 
 enum HitKind { case out, water, ground, castle }
@@ -155,11 +158,11 @@ struct ShotOutcome {
 
 /// Building pieces. A tile is 2×2 grid cells; `span` is the piece's footprint in tiles.
 enum PieceKind: Int, CaseIterable, Identifiable {
-    case wallLow = 1, wallHigh, tower, tallTower, bastion, keep
+    case wallLow = 1, wallHigh, tower, tallTower, bastion, keep, heart
     var id: Int { rawValue }
     var span: Int {
         switch self {
-        case .wallLow, .wallHigh: return 1
+        case .wallLow, .wallHigh, .heart: return 1
         case .tower, .tallTower, .bastion: return 2
         case .keep: return 3
         }
@@ -173,6 +176,7 @@ struct Piece: Equatable {
 }
 
 /// A castle as its owner laid it out: pieces on an 11×15 tile grid, paid for in stone.
+/// Every castle guards one heart; the heart is free, the keep is optional.
 struct CastleDesign: Equatable {
     var pieces: [Piece] = []
 
@@ -181,7 +185,7 @@ struct CastleDesign: Equatable {
 
     private static let costs: [PieceKind: Int] = {
         var out: [PieceKind: Int] = [:]
-        for k in PieceKind.allCases {
+        for k in PieceKind.allCases where k != .heart {
             var p = Plan()
             p.add(Piece(kind: k, tx: 4, tz: 4))
             out[k] = p.vox.reduce(0) { $0 + ($1 == 0 ? 0 : 1) }
@@ -192,6 +196,7 @@ struct CastleDesign: Equatable {
     static func cost(of kind: PieceKind) -> Int { costs[kind] ?? 0 }
     var cost: Int { pieces.reduce(0) { $0 + CastleDesign.cost(of: $1.kind) } }
     var keeps: Int { pieces.filter { $0.kind == .keep }.count }
+    var hearts: Int { pieces.filter { $0.kind == .heart }.count }
 
     /// Index of the piece covering a tile, if any.
     func piece(atRow tx: Int, col tz: Int) -> Int? {
@@ -209,14 +214,15 @@ struct CastleDesign: Equatable {
     }
 
     /// What stops this design from being played, if anything.
-    enum Problem { case noKeep, manyKeeps, tooSmall, overBudget, overlap }
+    enum Problem { case noHeart, manyHearts, manyKeeps, tooSmall, overBudget, overlap }
     var problem: Problem? {
         var seen = CastleDesign()
         for p in pieces {
             if !seen.fits(p.kind, row: p.tx, col: p.tz) { return .overlap }
             seen.pieces.append(p)
         }
-        if keeps == 0 { return .noKeep }
+        if hearts == 0 { return .noHeart }
+        if hearts > 1 { return .manyHearts }
         if keeps > 1 { return .manyKeeps }
         if cost > CastleDesign.budget { return .overBudget }
         if cost < CastleDesign.minimum { return .tooSmall }
@@ -240,8 +246,26 @@ struct CastleDesign: Equatable {
 
     init(pieces: [Piece] = []) { self.pieces = pieces }
 
+    /// Reads a castle saved before hearts existed: the heart goes on the free tile nearest the back centre.
+    static func migrating(encoded: [Int]) -> CastleDesign? {
+        if let d = CastleDesign(encoded: encoded) { return d }
+        guard encoded.count % 3 == 0 else { return nil }
+        var d = CastleDesign()
+        for i in stride(from: 0, to: encoded.count, by: 3) {
+            guard let k = PieceKind(rawValue: encoded[i]) else { return nil }
+            d.pieces.append(Piece(kind: k, tx: encoded[i + 1], tz: encoded[i + 2]))
+        }
+        guard d.hearts == 0 else { return nil }
+        var spots: [(Int, Int)] = []
+        for r in 0..<rows { for c in 0..<cols where d.fits(.heart, row: r, col: c) { spots.append((r, c)) } }
+        let mid = cols / 2
+        guard let best = spots.min(by: { abs($0.0 - 2) * 2 + abs($0.1 - mid) < abs($1.0 - 2) * 2 + abs($1.1 - mid) }) else { return nil }
+        d.pieces.append(Piece(kind: .heart, tx: best.0, tz: best.1))
+        return d.problem == nil ? d : nil
+    }
+
     /// Reads a drawing: one string per tile row, back of the castle first.
-    /// w/W low/high wall, T tower, A tall tower, B bastion, K keep (top-left tile of the piece), anything else empty.
+    /// w/W low/high wall, T tower, A tall tower, B bastion, K keep (top-left tile of the piece), H heart, anything else empty.
     init(map: [String]) {
         var out: [Piece] = []
         for (r, line) in map.enumerated() {
@@ -254,6 +278,7 @@ struct CastleDesign: Equatable {
                 case "A": kind = .tallTower
                 case "B": kind = .bastion
                 case "K": kind = .keep
+                case "H": kind = .heart
                 default: kind = nil
                 }
                 if let kind { out.append(Piece(kind: kind, tx: r, tz: c)) }
@@ -266,7 +291,7 @@ struct CastleDesign: Equatable {
         "A+WWWWWWWWWWWA+",
         "++...........++",
         "w.............w",
-        "w.............w",
+        "w......H......w",
         "w.....K++.....w",
         "w.....+++.....w",
         "w.....+++.....w",
@@ -283,7 +308,7 @@ enum Presets {
         "...............",
         "...............",
         "...T+wwwwwT+...",
-        "...++.....++...",
+        "...++..H..++...",
         "...w..K++..w...",
         "...w..+++..w...",
         "...w..+++..w...",
@@ -297,7 +322,7 @@ enum Presets {
         "++...........++",
         "...............",
         "..wwwwwwwwwww..",
-        "...............",
+        ".......H.......",
         "......K++......",
         "......+++......",
         "......+++......",
@@ -308,7 +333,7 @@ enum Presets {
     static let spires = CastleDesign(map: [
         "A+..A+...A+..A+",
         "++ww++www++ww++",
-        "...............",
+        ".......H.......",
         "w.....K++.....w",
         "w.....+++.....w",
         "w.....+++.....w",
@@ -322,7 +347,7 @@ enum Presets {
         "...............",
         "..B+WWWWWWWB+..",
         "..++.......++..",
-        "..W.A+...A+.W..",
+        "..W.A+.H.A+.W..",
         "..W.++K++++.W..",
         "..W...+++...W..",
         "..W...+++...W..",
@@ -334,7 +359,7 @@ enum Presets {
     static let bulwark = CastleDesign(map: [
         "T+wwwwwwwwwwwT+",
         "++...........++",
-        "w.............w",
+        "w......H......w",
         "w.....K++.....w",
         "w.....+++.....w",
         "w.....+++.....w",
@@ -349,7 +374,7 @@ enum Presets {
         "++...........++",
         "W.............W",
         "W...wwwwwww...W",
-        "W...w.K++.w...W",
+        "W...wHK++.w...W",
         "W...w.+++.w...W",
         "W...w.+++.w...W",
         "W...www.www...W",
@@ -361,7 +386,7 @@ enum Presets {
         "A+WWWWWWWWWWWA+",
         "++...........++",
         "w..B+.....B+..w",
-        "w..++.....++..w",
+        "w..++..H..++..w",
         "w.....K++.....w",
         "w.....+++.....w",
         "w.....+++.....w",
@@ -415,7 +440,13 @@ private struct Plan {
         case .tallTower: tower(x0, z0, 14)
         case .bastion: bastion(x0, z0)
         case .keep: keep(x0, z0)
+        case .heart: heart(x0, z0)
         }
+    }
+
+    /// The heart: three courses of glowing crystal, harder to break than stone. Lose it and the castle falls.
+    private mutating func heart(_ x0: Int, _ z0: Int) {
+        box(x0, x0 + 1, 0, 2, z0, z0 + 1, 4)
     }
 
     /// Solid wall, two cells thick, with a team-colour top course and battlements.
@@ -522,6 +553,9 @@ final class Castle {
     let decor: [DecorSpec]
     let total: Int
     private(set) var aliveCells: Int
+    /// Heart cells at the start and now. The castle falls when the last one is gone.
+    let heartTotal: Int
+    private(set) var heartAlive: Int
 
     init(side: Int, design: CastleDesign) {
         self.side = side
@@ -533,12 +567,18 @@ final class Castle {
         cellBlock = t.cellBlock
         decor = plan.decor
         var sup = [Bool](repeating: false, count: t.blocks.count)
-        var sum = 0
+        var sum = 0, hearts = 0
         for i in blocks.indices {
-            if Castle.supported(blocks[i], sup, cellBlock) { sup[i] = true; sum += blocks[i].len } else { blocks[i].alive = false; blocks[i].ghost = true }
+            if Castle.supported(blocks[i], sup, cellBlock) {
+                sup[i] = true
+                sum += blocks[i].len
+                if blocks[i].mat == 4 { hearts += blocks[i].len }
+            } else { blocks[i].alive = false; blocks[i].ghost = true }
         }
         total = max(1, sum)
         aliveCells = sum
+        heartTotal = hearts
+        heartAlive = hearts
     }
 
     private static func supported(_ b: Block, _ sup: [Bool], _ cellBlock: [Int]) -> Bool {
@@ -551,6 +591,18 @@ final class Castle {
     }
 
     var pct: Double { Double(aliveCells) / Double(total) }
+    var heartPct: Double { heartTotal == 0 ? 0 : Double(heartAlive) / Double(heartTotal) }
+    var heartLost: Bool { heartAlive <= 0 }
+
+    /// Middle of what is left of the heart, if anything is.
+    var heartCenter: Vec3? {
+        let live = blocks.filter { $0.alive && $0.mat == 4 }
+        guard !live.isEmpty else { return nil }
+        var c = Vec3()
+        for b in live { let p = center(of: b); c.x += p.x; c.y += p.y; c.z += p.z }
+        let n = Double(live.count)
+        return Vec3(x: c.x / n, y: c.y / n, z: c.z / n)
+    }
 
     func center(of b: Block) -> Vec3 {
         let lx = Double(b.x) + (b.dir == 1 ? Double(b.len) / 2 : 0.5)
@@ -586,19 +638,26 @@ final class Castle {
         let lx = s * (c.x - x0), lz = s * c.z + Double(K.gd) / 2
         if lx < -R || lx > Double(K.gw) + R || lz < -R || lz > Double(K.gd) + R { return out }
         var dead = [Bool](repeating: false, count: blocks.count)
-        let r2 = R * R
+        let r2 = R * R, h2 = r2 * K.heartReach * K.heartReach
         for b in blocks where b.alive {
             for i in 0..<b.len {
                 let dx = Double(b.x + (b.dir == 1 ? i : 0)) + 0.5 - lx
                 let dy = (Double(b.y) + 0.5) * K.lh - c.y
                 let dz = Double(b.z + (b.dir == 2 ? i : 0)) + 0.5 - lz
-                if dx * dx + dy * dy + dz * dz <= r2 { dead[b.id] = true; out.blast.append(b.id); out.cells += b.len; break }
+                if dx * dx + dy * dy + dz * dz <= (b.mat == 4 ? h2 : r2) {
+                    dead[b.id] = true; out.blast.append(b.id); out.cells += b.len
+                    if b.mat == 4 { out.heart += b.len }
+                    break
+                }
             }
         }
         if out.blast.isEmpty { return out }
         var sup = [Bool](repeating: false, count: blocks.count)
         for b in blocks where b.alive && !dead[b.id] {
-            if Castle.supported(b, sup, cellBlock) { sup[b.id] = true } else { out.fall.append(b.id); out.cells += b.len }
+            if Castle.supported(b, sup, cellBlock) { sup[b.id] = true } else {
+                out.fall.append(b.id); out.cells += b.len
+                if b.mat == 4 { out.heart += b.len }
+            }
         }
         return out
     }
@@ -623,6 +682,7 @@ final class Castle {
         for id in d.blast { blocks[id].alive = false }
         for id in d.fall { blocks[id].alive = false }
         aliveCells -= d.cells
+        heartAlive -= d.heart
     }
 
     /// Puts fallen blocks back, lowest first, as long as each has something to stand on. Returns what was rebuilt.
@@ -638,7 +698,10 @@ final class Castle {
                     if id >= 0 && blocks[id].alive { held = true; break }
                 }
             }
-            if held { blocks[i].alive = true; left -= b.len; aliveCells += b.len; out.append(i) }
+            if held {
+                blocks[i].alive = true; left -= b.len; aliveCells += b.len; out.append(i)
+                if b.mat == 4 { heartAlive += b.len }
+            }
             if left <= 0 { break }
         }
         return out
@@ -843,7 +906,12 @@ final class Battle {
     /// The side to move let the shot clock run out.
     func forfeitTurn() { streak[turn] = 0 }
 
-    func loser() -> Int? { castles.firstIndex { $0.pct < K.lose } }
+    /// The side whose heart is gone. If one shot takes both hearts, the side that fired it loses.
+    func loser() -> Int? {
+        let lost = castles.filter { $0.heartLost }.map { $0.side }
+        if lost.count == 2 { return turn }
+        return lost.first
+    }
 }
 
 // MARK: - Aiming
@@ -875,6 +943,7 @@ enum Difficulty: String, CaseIterable, Identifiable {
     var goldChance: Double { self == .kolay ? 0.15 : self == .orta ? 0.4 : 0.75 }
     var ammoChance: Double { self == .kolay ? 0.1 : self == .orta ? 0.22 : 0.35 }
     var samples: Int { self == .kolay ? 1 : self == .orta ? 3 : 12 }
+    var heartChance: Double { self == .kolay ? 0.1 : self == .orta ? 0.2 : 0.25 }
     var yawNoise: Double { self == .kolay ? 5.0 : self == .orta ? 2.2 : 0.7 }
     var speedNoise: Double { self == .kolay ? 0.075 : self == .orta ? 0.035 : 0.012 }
 }
@@ -920,17 +989,20 @@ enum Computer {
             ammo = Ammo.specials.filter { battle.stock[side][$0.rawValue] > 0 }.randomElement() ?? .standard
         }
         let radius = K.blastR * battle.rules.blastScale * (mega ? K.megaBoost : 1)
+        func worth(_ d: Damage) -> Int { d.cells + d.heart * 15 }
         var best = enemy.center(of: alive[0]), bestScore = -1
         for _ in 0..<difficulty.samples {
             let c = enemy.center(of: alive.randomElement()!)
-            let score = enemy.damage(at: c, radius: radius).cells
+            let score = worth(enemy.damage(at: c, radius: radius))
             if score > bestScore { bestScore = score; best = c }
         }
         // Sometimes go for the gold target instead; better players do it more often. A homing shot always does.
         if ammo == .homing || Double.random(in: 0...1) < difficulty.goldChance, let t = battle.goldTarget() {
-            let score = enemy.damage(at: t, radius: radius * K.critBoost).cells
+            let score = worth(enemy.damage(at: t, radius: radius * K.critBoost))
             if ammo == .homing || score > bestScore { bestScore = score; best = t }
         }
+        // Going straight for the heart: the walls in front of it are what stops this.
+        if ammo != .homing, Double.random(in: 0...1) < difficulty.heartChance, let h = enemy.heartCenter { best = h }
         let sol = solve(side: side, target: best, wind: w, gravity: battle.rules.gravity) ?? (yaw: 0, v: 32)
         let v = sol.v * (1 + gauss() * difficulty.speedNoise)
         let yaw = sol.yaw + gauss() * difficulty.yawNoise
@@ -957,7 +1029,7 @@ enum Challenge {
         return dealt * 10 + (crit ? 50 : 0) + (streak >= 2 ? 10 * min(streak, 5) : 0)
     }
 
-    /// Bringing the castle under the losing line early pays for every shot left unused.
+    /// Breaking the heart early pays for every shot left unused.
     static func clearBonus(unusedShots: Int) -> Int { 150 + 75 * unusedShots }
 }
 

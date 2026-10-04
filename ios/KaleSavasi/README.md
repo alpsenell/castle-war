@@ -1,7 +1,7 @@
 # Castle War / Kale Savaşı (iOS)
 
-Two castles, two cannons. Players take turns firing; the castle that drops below 20 % of its
-structure loses. Native Swift: SceneKit for the 3D scene, SwiftUI for the HUD and menus.
+Two castles, two cannons, two hearts. Players take turns firing; the first player whose heart
+is shattered loses. Native Swift: SceneKit for the 3D scene, SwiftUI for the HUD and menus.
 The game ships in Turkish and English.
 
 ## Run
@@ -29,17 +29,28 @@ Touch anywhere on the scene, pull back (down) and release, slingshot style:
 Wind changes every turn (arrow in the top plate, up means toward the target). The binoculars
 button orbits the enemy castle; drag to rotate, pinch to zoom.
 
+### The heart
+
+Every castle guards one heart: three courses of glowing crystal with a gem floating above it.
+Destroying the enemy heart wins the match, however much of their castle is still standing.
+The heart is tougher than stone: a blast only breaks heart crystal within half its usual
+reach, so it takes a well-placed shot, or a wall knocked out of the way first. The bar under
+each name shows the heart; the small number beside it is how much of the castle still stands.
+
 ### Build your castle
 
-The castle you defend is your own design. The builder is a grid of 11 × 15 tiles seen from
-above, with a live 3D preview beside it. Six pieces cost stone: low and high walls (one tile),
-towers, tall towers and bastions (2 × 2), and the keep (3 × 3). A castle needs exactly one
-keep, at least 1,200 stone and at most 2,400. Tall towers and bastions unlock with campaign
+The castle you defend is your own design, and its job is to keep the heart out of reach. The
+builder is a grid of 11 × 15 tiles seen from above, with a live 3D preview beside it. Six
+pieces cost stone: low and high walls (one tile), towers, tall towers and bastions (2 × 2), and
+the keep (3 × 3). The heart (one tile) is free. A castle needs exactly one heart, at most one
+keep, at least 1,200 stone and at most 2,400. Castles saved before hearts existed get one
+placed automatically on the free tile nearest the back centre. Tall towers and bastions unlock with campaign
 stars. Online, each player's design is sent at the start of the match and checked against
-these rules on arrival; anything that fails becomes the classic layout.
+these rules on arrival; anything that fails becomes the classic layout. Both devices must run
+the same rules version, or the lobby says so and stops.
 
 Design matters: in computer-versus-computer tests against the classic layout, the ready-made
-castles won between 7 % and 83 % of matches.
+castles won between 29 % and 59 % of matches.
 
 ### Special shots, balloons and match twists
 
@@ -73,7 +84,7 @@ steps), opens the next stage, and counts toward the building pieces.
 A solo score attack: eight shots at a castle that does not shoot back. The castle, the winds
 and the gold targets (and, some days, a twist) come from the date, so every player gets the same siege that day and
 scores are comparable. A shot scores 10 points per percent of damage, 50 for a critical and up
-to 50 for the current streak; bringing the castle under 20 % early adds 150 plus 75 per unused
+to 50 for the current streak; shattering the heart early adds 150 plus 75 per unused
 shot. Today's best and the all-time record are kept, and the first run of the day pays 60 XP.
 
 ### Daily missions

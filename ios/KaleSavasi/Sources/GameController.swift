@@ -11,6 +11,7 @@ enum Panel { case home, profile, settings, howTo, campaign }
 struct HUD: Equatable {
     var names = ["", ""]
     var pct = [1.0, 1.0]
+    var heart = [1.0, 1.0]
     var charge = [0.0, 0.0]
     var streak = [0, 0]
     var shield = [false, false]
@@ -367,7 +368,7 @@ final class GameController: NSObject, ObservableObject {
             guard old.kind.span == 1 else { if fresh { builderNote = Tx.noRoom }; return }
             next.pieces.remove(at: i)                                                                              // swap one wall for the other
         }
-        if kind == .keep { next.pieces.removeAll { $0.kind == .keep } }      // there is one keep: placing it again moves it
+        if kind == .keep || kind == .heart { next.pieces.removeAll { $0.kind == kind } }      // only one of each: placing it again moves it
         guard next.fits(kind, row: tx, col: tz) else { if fresh { builderNote = Tx.noRoom }; return }
         next.pieces.append(Piece(kind: kind, tx: tx, tz: tz))
         guard next.cost <= CastleDesign.budget else { builderNote = Tx.noStone; return }
@@ -540,6 +541,8 @@ final class GameController: NSObject, ObservableObject {
                 if mode == .challenge { msg += "  ·  " + Tx.points(earned) }
                 else if battle.streak[f.side] >= 2 { msg += "  ·  " + Tx.streak(battle.streak[f.side]) }
             } else if out.damage[f.side].cells > 0 { msg = Tx.ownCastle }
+            if out.damage[enemy].heart > 0 { msg = (battle.castles[enemy].heartLost ? Tx.heartBroken : Tx.heartHit) + "  ·  " + msg }
+            else if out.damage[f.side].heart > 0 { msg = Tx.ownHeart }
             if out.shieldBroken != nil { msg = Tx.shieldBroken + "  ·  " + msg }
         }
         if dealt == 0, out.damage[f.side].cells == 0, let k = out.pickup { msg = Tx.grabbed(k) }
@@ -576,7 +579,7 @@ final class GameController: NSObject, ObservableObject {
     private func endTurn() {
         if mode == .challenge {
             shotsTaken += 1
-            let cleared = battle.castles[1].pct < K.lose
+            let cleared = battle.castles[1].heartLost
             if cleared || shotsTaken >= Challenge.shots { finishSiege(cleared: cleared); return }
             battle.advance(by: 2)     // the target castle never shoots back, so the turn stays with the player
             beginTurn()
@@ -632,7 +635,7 @@ final class GameController: NSObject, ObservableObject {
         enterOverState(lookingAt: winner)
         let nm = names()
         let p = battle.castles.map { Int(($0.pct * 100 + 1e-9).rounded(.down)) }
-        var info = OverInfo(title: "", detail: forfeit ? Tx.forfeitWin : Tx.standing(nm[0], p[0], nm[1], p[1]))
+        var info = OverInfo(title: "", detail: forfeit ? Tx.forfeitWin : Tx.heartFell(nm[1 - winner]) + " " + Tx.standing(nm[0], p[0], nm[1], p[1]))
         if let mine = mySide {
             let won = winner == mine
             info.title = won ? Tx.won : Tx.lost
@@ -673,6 +676,7 @@ final class GameController: NSObject, ObservableObject {
         var h = HUD()
         h.names = names()
         h.pct = battle.castles.map { $0.pct }
+        h.heart = battle.castles.map { $0.heartPct }
         h.charge = battle.charge
         h.streak = battle.streak
         h.shield = battle.shield
@@ -786,7 +790,8 @@ final class GameController: NSObject, ObservableObject {
         myNonce = UInt32.random(in: 1...UInt32.max)
         lobby.busy = true
         lobby.status = Tx.opponentFound
-        net?.send(NetMessage(t: "hello", nonce: myNonce, name: profile.name, trophies: profile.trophies, level: profile.level, design: profile.castle.encoded), reliable: true)
+        net?.send(NetMessage(t: "hello", nonce: myNonce, name: profile.name, trophies: profile.trophies, level: profile.level, design: profile.castle.encoded,
+                             rules: K.rulesVersion), reliable: true)
     }
 
     private func netLost() {
@@ -821,6 +826,13 @@ final class GameController: NSObject, ObservableObject {
         case "hello":
             guard let n = m.nonce else { return }
             if n == myNonce { netConnected(); return }
+            guard m.rules == K.rulesVersion else {
+                // The other device plays by different rules; a match between them would not stay in step.
+                stopNet()
+                lobby.status = Tx.versionMismatch
+                lobby.busy = false
+                return
+            }
             // What the opponent tells us about themselves is shown, never trusted for anything else.
             // Their castle is checked against the building rules; anything else becomes the classic layout.
             rival = (Profile.cleanName(m.name ?? ""), min(100_000, max(0, m.trophies ?? 0)), min(999, max(1, m.level ?? 1)),
