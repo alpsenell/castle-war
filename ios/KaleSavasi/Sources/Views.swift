@@ -19,9 +19,9 @@ enum Paint {
     static let red = Color(hex: 0xc62d1f), redDark = Color(hex: 0x8e1f15)
     static let blue = Color(hex: 0x1f5fc4), blueDark = Color(hex: 0x143f85)
     static let yellow = Color(hex: 0xf2cd37), yellowDark = Color(hex: 0xc49a0c)
-    static let green = Color(hex: 0x2f9e55)
     static let heart = Color(hex: 0xd8246e)
-    static func team(_ side: Int) -> Color { side == 0 ? red : blue }
+    static let green = Color(hex: 0x2f9e55), gold = Color(hex: 0xd9a514)
+    static func team(_ side: Int) -> Color { [red, blue, Color(hex: 0x2f8f3e), gold][max(0, side) % 4] }
     static func heavy(_ size: CGFloat) -> Font { .system(size: size, weight: .heavy, design: .rounded) }
     static func text(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font { .system(size: size, weight: weight, design: .rounded) }
 }
@@ -128,6 +128,7 @@ struct RootView: View {
                     case .howTo: HowToView()
                     case .campaign: CampaignView()
                     case .achievements: AchievementsView()
+                    case .party: PartyView()
                     }
                 case .lobby: LobbyView()
                 case .over: if game.over != nil { OverView() }
@@ -212,6 +213,75 @@ struct HealthPlate: View {
         .animation(.easeOut(duration: 0.6), value: charge)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Tx.health(name, core, whole))
+    }
+}
+
+/// One castle of four: name, heart bar and how much still stands. Dimmed once its heart is gone.
+struct SeatPlate: View {
+    let name: String
+    let heart: Double
+    let pct: Double
+    let color: Color
+    let out: Bool
+    let active: Bool
+    let mine: Bool
+    let shielded: Bool
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 4) {
+                Circle().fill(color).frame(width: 9, height: 9)
+                Text(name).font(Paint.heavy(12)).foregroundStyle(Paint.ink).lineLimit(1).minimumScaleFactor(0.7)
+                if shielded { Image(systemName: "shield.fill").font(.system(size: 9, weight: .bold)).foregroundStyle(Color(hex: 0x3a8fdc)) }
+                Spacer(minLength: 2)
+                Image(systemName: out ? "heart.slash.fill" : "heart.fill").font(.system(size: 10, weight: .bold)).foregroundStyle(Paint.heart)
+                Text(Tx.pct(Int((heart * 100 + 1e-9).rounded(.up)))).font(Paint.text(11, .heavy)).monospacedDigit().foregroundStyle(Paint.heart)
+            }
+            GeometryReader { g in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Paint.track)
+                    Capsule().fill(color.opacity(0.35)).frame(width: max(0, g.size.width * pct))
+                    Capsule().fill(Paint.heart).frame(width: max(0, g.size.width * heart)).frame(height: 4)
+                }
+                .clipShape(Capsule())
+            }
+            .frame(height: 7)
+        }
+        .padding(.horizontal, 9).padding(.vertical, 5)
+        .frame(width: 168)
+        .modifier(Plate(radius: 11, fill: active ? Paint.yellow.opacity(0.9) : .white))
+        .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(mine ? color : .clear, lineWidth: 3))
+        .opacity(out ? 0.45 : 1)
+        .animation(.easeOut(duration: 0.6), value: heart)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Tx.health(name, Int((heart * 100).rounded(.up)), Int((pct * 100).rounded(.down))))
+    }
+}
+
+/// Four castles: which enemy castle the cannon points at.
+struct TargetPicker: View {
+    @EnvironmentObject var game: GameController
+    let targets: [Int]
+    let current: Int
+    let names: [String]
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(Tx.target).font(Paint.text(12, .heavy)).foregroundStyle(.white)
+            ForEach(targets, id: \.self) { t in
+                Button { game.selectTarget(t) } label: {
+                    HStack(spacing: 5) {
+                        Circle().fill(Paint.team(t)).frame(width: 10, height: 10)
+                        Text(names.indices.contains(t) ? names[t] : Tx.seatName(t)).font(Paint.text(12, .heavy)).lineLimit(1)
+                    }
+                    .foregroundStyle(Paint.ink)
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .modifier(Plate(radius: 10, fill: t == current ? Paint.yellow : .white))
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(t == current ? .isSelected : [])
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .background(Capsule().fill(Paint.ink.opacity(0.7)))
     }
 }
 
@@ -346,41 +416,7 @@ struct HUDView: View {
     var body: some View {
         let h = game.hud
         VStack(spacing: 10) {
-            HStack(alignment: .top) {
-                if let score = h.score {
-                    ScorePlate(score: score, taken: h.shotsTaken, charge: h.charge[0], streak: h.streak[0]).allowsHitTesting(false)
-                } else {
-                    HealthPlate(name: h.names[0], pct: h.pct[0], heart: h.heart[0], color: Paint.red, charge: h.charge[0], streak: h.streak[0], shielded: h.shield[0]).allowsHitTesting(false)
-                }
-                Spacer(minLength: 8)
-                VStack(spacing: 2) {
-                    Text(h.turnText).font(Paint.heavy(16)).lineLimit(1)
-                    HStack(spacing: 5) {
-                        Image(systemName: "arrow.up").font(.system(size: 12, weight: .black)).rotationEffect(.degrees(h.windAngle))
-                        Text(Tx.wind(h.windPower)).font(Paint.text(13, .semibold)).monospacedDigit()
-                        if h.modifier != .none {
-                            Text("·").font(Paint.text(13, .heavy))
-                            Label(Tx.modifier(h.modifier), systemImage: Icons.modifier(h.modifier)).font(Paint.text(12, .heavy)).foregroundStyle(Paint.yellow)
-                        }
-                    }
-                    if let t = game.timeLeft {
-                        HStack(spacing: 5) {
-                            Meter(value: Double(t) / K.turnSeconds, color: t <= 5 ? Paint.yellow : .white, track: .white.opacity(0.3), height: 5)
-                                .frame(width: 84)
-                                .animation(.linear(duration: 1), value: t)
-                            Text("\(t)").font(Paint.text(12, .heavy)).monospacedDigit().foregroundStyle(t <= 5 ? Paint.yellow : .white)
-                                .frame(width: 18, alignment: .trailing)
-                        }
-                    }
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 16).padding(.vertical, 6)
-                .modifier(Plate(fill: h.finished ? Paint.ink : Paint.team(h.turnSide)))
-                .allowsHitTesting(false)
-                .accessibilityElement(children: .combine)
-                Spacer(minLength: 8)
-                HealthPlate(name: h.names[1], pct: h.pct[1], heart: h.heart[1], color: Paint.blue, charge: h.charge[1], streak: h.streak[1], shielded: h.shield[1]).allowsHitTesting(false)
-            }
+            if h.names.count > 2 { partyTop(h) } else { duelTop(h) }
             HStack(spacing: 10) {
                 Spacer()
                 if h.canInspect {
@@ -390,6 +426,7 @@ struct HUDView: View {
                 ToolButton(icon: "house.fill", label: Tx.mainMenu) { game.askToQuit() }
             }
             Spacer()
+            if h.targets.count > 1 && h.canAim { TargetPicker(targets: h.targets, current: h.target, names: h.names) }
             ZStack(alignment: .bottom) {
                 hint(h).allowsHitTesting(false)
                 if h.megaVisible {
@@ -398,6 +435,67 @@ struct HUDView: View {
             }
         }
         .padding(.top, 10).padding(.bottom, 6).padding(.horizontal, 8)
+    }
+
+    /// Four castles: two small plates on each side of the turn plate.
+    private func partyTop(_ h: HUD) -> some View {
+        HStack(alignment: .top) {
+            VStack(spacing: 6) { ForEach([0, 1], id: \.self) { seatPlate(h, $0) } }
+            Spacer(minLength: 8)
+            turnPlate(h)
+            Spacer(minLength: 8)
+            VStack(spacing: 6) { ForEach([2, 3], id: \.self) { seatPlate(h, $0) } }
+        }
+    }
+
+    @ViewBuilder private func seatPlate(_ h: HUD, _ i: Int) -> some View {
+        if i < h.names.count {
+            SeatPlate(name: h.names[i], heart: h.heart[i], pct: h.pct[i], color: Paint.team(i), out: h.out.indices.contains(i) && h.out[i],
+                      active: h.turnSide == i && !h.finished, mine: h.me == i, shielded: h.shield.indices.contains(i) && h.shield[i])
+                .allowsHitTesting(false)
+        }
+    }
+
+    private func duelTop(_ h: HUD) -> some View {
+        HStack(alignment: .top) {
+            if let score = h.score {
+                ScorePlate(score: score, taken: h.shotsTaken, charge: h.charge[0], streak: h.streak[0]).allowsHitTesting(false)
+            } else {
+                HealthPlate(name: h.names[0], pct: h.pct[0], heart: h.heart[0], color: Paint.red, charge: h.charge[0], streak: h.streak[0], shielded: h.shield[0]).allowsHitTesting(false)
+            }
+            Spacer(minLength: 8)
+            turnPlate(h)
+            Spacer(minLength: 8)
+            HealthPlate(name: h.names[1], pct: h.pct[1], heart: h.heart[1], color: Paint.blue, charge: h.charge[1], streak: h.streak[1], shielded: h.shield[1]).allowsHitTesting(false)
+        }
+    }
+
+    private func turnPlate(_ h: HUD) -> some View {
+            VStack(spacing: 2) {
+                Text(h.turnText).font(Paint.heavy(16)).lineLimit(1)
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.up").font(.system(size: 12, weight: .black)).rotationEffect(.degrees(h.windAngle))
+                    Text(Tx.wind(h.windPower)).font(Paint.text(13, .semibold)).monospacedDigit()
+                    if h.modifier != .none {
+                        Text("·").font(Paint.text(13, .heavy))
+                        Label(Tx.modifier(h.modifier), systemImage: Icons.modifier(h.modifier)).font(Paint.text(12, .heavy)).foregroundStyle(Paint.yellow)
+                    }
+                }
+                if let t = game.timeLeft {
+                    HStack(spacing: 5) {
+                        Meter(value: Double(t) / K.turnSeconds, color: t <= 5 ? Paint.yellow : .white, track: .white.opacity(0.3), height: 5)
+                            .frame(width: 84)
+                            .animation(.linear(duration: 1), value: t)
+                        Text("\(t)").font(Paint.text(12, .heavy)).monospacedDigit().foregroundStyle(t <= 5 ? Paint.yellow : .white)
+                            .frame(width: 18, alignment: .trailing)
+                    }
+                }
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 16).padding(.vertical, 6)
+            .modifier(Plate(fill: h.finished ? Paint.ink : Paint.team(h.turnSide)))
+            .allowsHitTesting(false)
+            .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder private func hint(_ h: HUD) -> some View {

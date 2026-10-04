@@ -27,13 +27,28 @@ struct NetMessage: Codable {
     var ammo: Int? = nil
     /// Sent with "hello": the sender's `K.rulesVersion`. Missing means an older build.
     var rules: Int? = nil
+    /// Four-castle matches: the seat a shot, aim or skip belongs to.
+    var seat: Int? = nil
+    /// Four-castle "start": who sits where. A nonce of 0 is a computer player run by the host.
+    var seats: [SeatInfo]? = nil
+}
+
+struct SeatInfo: Codable, Equatable {
+    var nonce: UInt32
+    var name: String
+    var level: Int
+    var design: [Int]
 }
 
 /// A two-player connection. All callbacks arrive on the main queue.
 protocol MatchTransport: AnyObject {
     var onConnected: (() -> Void)? { get set }
     var onMessage: ((NetMessage) -> Void)? { get set }
+    /// Everyone else has gone.
     var onDisconnected: (() -> Void)? { get set }
+    /// Four-castle matches: how many other devices are connected now.
+    var onPeers: ((Int) -> Void)? { get set }
+    var peerCount: Int { get }
     /// Text for the lobby and whether work is still in progress.
     var onStatus: ((String, Bool) -> Void)? { get set }
     func start()
@@ -51,8 +66,17 @@ final class GameCenterTransport: NSObject, MatchTransport, GKMatchDelegate, GKMa
     var onConnected: (() -> Void)?
     var onMessage: ((NetMessage) -> Void)?
     var onDisconnected: (() -> Void)?
+    var onPeers: ((Int) -> Void)?
     var onStatus: ((String, Bool) -> Void)?
+    var peerCount: Int { match?.players.count ?? 0 }
+    /// Most players in one match: 2 for a duel, 4 for a four-castle match.
+    private let players: Int
     private var match: GKMatch?
+
+    init(players: Int = 2) {
+        self.players = players
+        super.init()
+    }
     private var live = false
     private var stopped = false
 
@@ -73,7 +97,7 @@ final class GameCenterTransport: NSObject, MatchTransport, GKMatchDelegate, GKMa
         if let invite { vc = GKMatchmakerViewController(invite: invite) } else {
             let req = GKMatchRequest()
             req.minPlayers = 2
-            req.maxPlayers = 2
+            req.maxPlayers = players
             vc = GKMatchmakerViewController(matchRequest: req)
         }
         guard let vc else { onStatus?(Tx.matchScreenFailed, false); return }
@@ -113,8 +137,14 @@ final class GameCenterTransport: NSObject, MatchTransport, GKMatchDelegate, GKMa
     }
 
     func match(_ match: GKMatch, player: GKPlayer, didChange state: GKPlayerConnectionState) {
+        let left = match.players.count
         if state == .connected { if match.expectedPlayerCount == 0 { goLive() } }
-        else if state == .disconnected { onMain { self.onDisconnected?() } }
+        else if state == .disconnected {
+            onMain {
+                self.onPeers?(left)
+                if left == 0 || self.players == 2 { self.onDisconnected?() }
+            }
+        }
     }
 
     func match(_ match: GKMatch, didReceive data: Data, fromRemotePlayer player: GKPlayer) {
@@ -143,28 +173,54 @@ final class GameCenterTransport: NSObject, MatchTransport, GKMatchDelegate, GKMa
 // MARK: - Nearby (same Wi-Fi or Bluetooth, no account)
 
 final class NearbyTransport: NSObject, MatchTransport, MCSessionDelegate, MCNearbyServiceAdvertiserDelegate, MCNearbyServiceBrowserDelegate {
+    /// A duel pairs two equal devices. In a four-castle match one device hosts and up to three join it;
+    /// the joiners only talk to the host, which passes their messages on to everyone else.
+    enum Role { case duel, host, join }
+
     var onConnected: (() -> Void)?
     var onMessage: ((NetMessage) -> Void)?
     var onDisconnected: (() -> Void)?
+    var onPeers: ((Int) -> Void)?
     var onStatus: ((String, Bool) -> Void)?
+    var peerCount: Int { session.connectedPeers.count }
     private static let service = "kale-savasi"
+    private static let partyService = "kale-savasi4"
+    private let role: Role
     private let me = MCPeerID(displayName: String(UUID().uuidString.prefix(8)))
     private lazy var session = MCSession(peer: me, securityIdentity: nil, encryptionPreference: .required)
-    private lazy var advertiser = MCNearbyServiceAdvertiser(peer: me, discoveryInfo: nil, serviceType: Self.service)
-    private lazy var browser = MCNearbyServiceBrowser(peer: me, serviceType: Self.service)
+    private lazy var advertiser = MCNearbyServiceAdvertiser(peer: me, discoveryInfo: nil, serviceType: role == .duel ? Self.service : Self.partyService)
+    private lazy var browser = MCNearbyServiceBrowser(peer: me, serviceType: role == .duel ? Self.service : Self.partyService)
     private var live = false
     private var stopped = false
+    /// A host stops letting players in once the match has started.
+    private var open = true
+
+    init(role: Role = .duel) {
+        self.role = role
+        super.init()
+    }
 
     func start() {
         session.delegate = self
         advertiser.delegate = self
         browser.delegate = self
-        advertiser.startAdvertisingPeer()
-        browser.startBrowsingForPeers()
-        onStatus?(Tx.nearbySearching, true)
+        if role != .join { advertiser.startAdvertisingPeer() }
+        if role != .host { browser.startBrowsingForPeers() }
+        onStatus?(role == .host ? Tx.hostWaiting : role == .join ? Tx.joinSearching : Tx.nearbySearching, true)
+    }
+
+    /// The host closes the door when the match starts.
+    func close() {
+        open = false
+        advertiser.stopAdvertisingPeer()
     }
 
     func browser(_ browser: MCNearbyServiceBrowser, foundPeer peerID: MCPeerID, withDiscoveryInfo info: [String: String]?) {
+        if role == .join {
+            guard session.connectedPeers.isEmpty else { return }
+            browser.invitePeer(peerID, to: session, withContext: nil, timeout: 20)
+            return
+        }
         // Only one side sends the invitation, so two devices never invite each other at once.
         guard session.connectedPeers.isEmpty, me.displayName < peerID.displayName else { return }
         browser.invitePeer(peerID, to: session, withContext: nil, timeout: 20)
@@ -177,7 +233,8 @@ final class NearbyTransport: NSObject, MatchTransport, MCSessionDelegate, MCNear
     }
 
     func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didReceiveInvitationFromPeer peerID: MCPeerID, withContext context: Data?, invitationHandler: @escaping (Bool, MCSession?) -> Void) {
-        invitationHandler(session.connectedPeers.isEmpty, session)
+        let room = role == .host ? open && session.connectedPeers.count < 3 : session.connectedPeers.isEmpty
+        invitationHandler(room, session)
     }
 
     func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didNotStartAdvertisingPeer error: Error) {
@@ -187,12 +244,14 @@ final class NearbyTransport: NSObject, MatchTransport, MCSessionDelegate, MCNear
     func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) {
         onMain {
             guard !self.stopped else { return }
+            let count = session.connectedPeers.count
+            if self.role != .duel { self.onPeers?(count) }
             if state == .connected, !self.live {
                 self.live = true
-                self.advertiser.stopAdvertisingPeer()
+                if self.role != .host { self.advertiser.stopAdvertisingPeer() }
                 self.browser.stopBrowsingForPeers()
                 self.onConnected?()
-            } else if state == .notConnected, self.live {
+            } else if state == .notConnected, self.live, count == 0 || self.role != .host {
                 self.live = false
                 self.onDisconnected?()
             }
@@ -201,6 +260,10 @@ final class NearbyTransport: NSObject, MatchTransport, MCSessionDelegate, MCNear
 
     func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
         guard let m = try? JSONDecoder().decode(NetMessage.self, from: data) else { return }
+        if role == .host {
+            let others = session.connectedPeers.filter { $0 != peerID }
+            if !others.isEmpty { try? session.send(data, toPeers: others, with: .reliable) }
+        }
         onMain { if !self.stopped { self.onMessage?(m) } }
     }
 

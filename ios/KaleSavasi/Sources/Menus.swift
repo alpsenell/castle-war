@@ -193,6 +193,8 @@ struct MenuView: View {
                         Button { game.playOnline(.nearby) } label: { Label(Tx.nearbyShort, systemImage: "wifi") }
                             .buttonStyle(ChunkyButton(color: Paint.blue, dark: Paint.blueDark, size: 16))
                             .accessibilityLabel(Tx.onlineNearby)
+                        Button { game.panel = .party } label: { Label(Tx.party, systemImage: "person.3.fill") }
+                            .buttonStyle(ChunkyButton(color: Color(hex: 0x2f8f3e), dark: Color(hex: 0x1d5e28), size: 15))
                     }
                     HStack(spacing: 10) {
                         Button { game.playLocal() } label: { Label(Tx.localShort, systemImage: "person.2.fill") }
@@ -391,6 +393,32 @@ struct HowToView: View {
                 .frame(maxHeight: 230)
                 Button(Tx.gotIt) { game.closeHowTo() }
                     .buttonStyle(ChunkyButton(color: Paint.red, dark: Paint.redDark, size: 16, fill: false))
+            }
+        }
+    }
+}
+
+/// Four castles: against computers, or online with up to three other players.
+struct PartyView: View {
+    @EnvironmentObject var game: GameController
+    var body: some View {
+        Card(width: 520) {
+            VStack(alignment: .leading, spacing: 12) {
+                PanelHeader(title: Tx.partyTitle)
+                Text(Tx.partyPitch).font(Paint.text(14)).foregroundStyle(Paint.muted).fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 10) {
+                    Button { game.playParty() } label: { Label(Tx.partyComputers, systemImage: "cpu") }
+                        .buttonStyle(ChunkyButton(color: Paint.red, dark: Paint.redDark, size: 15))
+                    ForEach(Difficulty.allCases) { d in Chip(title: Tx.name(d), selected: game.difficulty == d) { game.difficulty = d } }
+                }
+                Button { game.playOnline(.partyGameCenter) } label: { Label(Tx.partyGameCenter, systemImage: "globe") }
+                    .buttonStyle(ChunkyButton(color: Paint.blue, dark: Paint.blueDark, size: 15))
+                HStack(spacing: 10) {
+                    Button { game.playOnline(.partyHost) } label: { Label(Tx.partyHost, systemImage: "antenna.radiowaves.left.and.right") }
+                        .buttonStyle(ChunkyButton(color: Color(hex: 0x2f8f3e), dark: Color(hex: 0x1d5e28), size: 15))
+                    Button { game.playOnline(.partyJoin) } label: { Label(Tx.partyJoin, systemImage: "wifi") }
+                        .buttonStyle(ChunkyButton(color: Paint.gold, dark: Paint.yellowDark, fg: Paint.ink, size: 15))
+                }
             }
         }
     }
@@ -718,7 +746,7 @@ struct LobbyView: View {
     var body: some View {
         Card(width: 460) {
             VStack(alignment: .leading, spacing: 14) {
-                Text(game.lobby.kind == .gameCenter ? Tx.gameCenterTitle : Tx.nearbyTitle)
+                Text(game.lobby.isParty ? Tx.partyTitle : game.lobby.kind == .gameCenter ? Tx.gameCenterTitle : Tx.nearbyTitle)
                     .font(Paint.heavy(24)).foregroundStyle(Paint.ink)
                 HStack(spacing: 10) {
                     if game.lobby.busy { ProgressView().tint(Paint.ink) }
@@ -726,9 +754,24 @@ struct LobbyView: View {
                         .font(Paint.text(15)).foregroundStyle(Paint.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                if game.lobby.isParty && game.lobby.kind != .partyJoin {
+                    HStack(spacing: 6) {
+                        ForEach(0..<4, id: \.self) { i in
+                            Image(systemName: i < game.lobby.players ? "person.fill" : "cpu")
+                                .font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
+                                .frame(width: 40, height: 34)
+                                .background(RoundedRectangle(cornerRadius: 9).fill(Paint.team(i).opacity(i < game.lobby.players ? 1 : 0.45)))
+                        }
+                    }
+                }
                 HStack(spacing: 14) {
-                    Button(Tx.retry) { game.playOnline(game.lobby.kind) }
-                        .buttonStyle(ChunkyButton(color: Paint.blue, dark: Paint.blueDark, size: 16))
+                    if game.lobby.canStart {
+                        Button(Tx.startNow) { game.startPartyNow() }
+                            .buttonStyle(ChunkyButton(color: Paint.green, dark: Color(hex: 0x1f6e3a), size: 16))
+                    } else {
+                        Button(Tx.retry) { game.playOnline(game.lobby.kind) }
+                            .buttonStyle(ChunkyButton(color: Paint.blue, dark: Paint.blueDark, size: 16))
+                    }
                     Button(Tx.cancel) { game.showMenu() }
                         .buttonStyle(ChunkyButton(color: Paint.yellow, dark: Paint.yellowDark, fg: Paint.ink, size: 16))
                 }

@@ -17,9 +17,10 @@ extension Vec3 {
 /// Materials. Everything is physically based and lit by the sky, so stone, slate, wood and
 /// iron pick up the same light.
 enum Look {
-    static let stone: [[UInt32]] = [[0xb9bcbd, 0xa4a8ab, 0xcdcfce], [0xdcc9a0, 0xc9b488, 0xe9dcbd]]
-    static let accent: [UInt32] = [0xb5301f, 0x2459b8]
-    static let trim: [UInt32] = [0x7b8085, 0xa08f6b]
+    static let stone: [[UInt32]] = [[0xb9bcbd, 0xa4a8ab, 0xcdcfce], [0xdcc9a0, 0xc9b488, 0xe9dcbd],
+                                    [0xaab5a2, 0x96a28d, 0xc1cab9], [0xd6c7b4, 0xc2b19b, 0xe6dacb]]
+    static let accent: [UInt32] = [0xb5301f, 0x2459b8, 0x2f8f3e, 0xd9a514]
+    static let trim: [UInt32] = [0x7b8085, 0xa08f6b, 0x6f7f6a, 0x9c8a5e]
     static let ink: UInt32 = 0x1b2a34
 
     private static var tinted: [String: UIImage] = [:]
@@ -265,7 +266,8 @@ final class CastleView {
                 n.addChildNode(pole)
                 let cloth = SCNNode(geometry: SCNBox(width: 2.2, height: 1.3, length: 0.05, chamferRadius: 0))
                 cloth.geometry?.materials = [Look.solid(Look.accent[castle.side], roughness: 0.9)]
-                cloth.position = SCNVector3(Float(castle.s) * 1.15, Float(d.ht) + 2.3, 0)
+                cloth.position = SCNVector3(Float(castle.fx) * 1.15, Float(d.ht) + 2.3, Float(castle.fz) * 1.15)
+                if !castle.alongWorldX { cloth.eulerAngles.y = .pi / 2 }
                 n.addChildNode(cloth)
             }
             n.simdPosition = castle.worldPoint(gx: d.x, gy: d.y, gz: d.z).f
@@ -332,7 +334,7 @@ final class CastleView {
     private func addFixedBody(_ b: Block) {
         let n = SCNNode()
         n.simdPosition = castle.center(of: b).f
-        if b.dir == 2 { n.eulerAngles.y = .pi / 2 }
+        if !runsAlongX(b) { n.eulerAngles.y = .pi / 2 }
         let body = SCNPhysicsBody(type: .static, shape: Phys.blockShape(b.len))
         body.categoryBitMask = Phys.fixed
         body.collisionBitMask = Phys.loose
@@ -345,7 +347,7 @@ final class CastleView {
         var mb = MeshBuilder(materials: materials.count)
         for b in castle.blocks where b.alive {
             let c = castle.center(of: b).f
-            let size: SIMD3<Float> = b.dir == 1 ? SIMD3(Float(b.len), Float(K.lh), 1) : SIMD3(1, Float(K.lh), Float(b.len))
+            let size: SIMD3<Float> = runsAlongX(b) ? SIMD3(Float(b.len), Float(K.lh), 1) : SIMD3(1, Float(K.lh), Float(b.len))
             mb.addBox(center: c, size: size - SIMD3(repeating: joint), material: look(b), bevel: bevel)
         }
         meshNode.geometry = mb.geometry(materials: materials)
@@ -367,7 +369,7 @@ final class CastleView {
         }
         let n = SCNNode(geometry: geo)
         n.simdPosition = castle.center(of: b).f
-        if b.dir == 2 { n.eulerAngles.y = .pi / 2 }
+        if !runsAlongX(b) { n.eulerAngles.y = .pi / 2 }
         let body = SCNPhysicsBody(type: .dynamic, shape: Phys.blockShape(b.len))
         body.mass = CGFloat(b.len)
         body.friction = 0.8
@@ -378,6 +380,9 @@ final class CastleView {
         n.physicsBody = body
         return n
     }
+
+    /// Whether a block's length lies along the world x axis; castles on the north and south seats are turned a quarter.
+    private func runsAlongX(_ b: Block) -> Bool { (b.dir == 1) == castle.alongWorldX }
 
     /// Stands rebuilt blocks back up. Returns where they are, for the effect.
     fileprivate func restore(_ ids: [Int]) -> [SIMD3<Float>] {
@@ -392,11 +397,12 @@ final class CannonView {
     private let barrel = SCNNode()
     var kick: Float = 0
     private let side: Int
+    let root = SCNNode()
 
-    init(side: Int, scene: SCNScene) {
+    init(side: Int, arena: Arena, scene: SCNScene) {
         self.side = side
-        let root = SCNNode()
-        root.position = SCNVector3(side == 0 ? -Float(K.platX) : Float(K.platX), 0, 0)
+        let pv = arena.pivot(side)
+        root.position = SCNVector3(Float(pv.x), 0, Float(pv.z))
         let w = CGFloat(K.platHalf * 2)
         let base = SCNNode(geometry: SCNBox(width: w, height: 1.8, length: w, chamferRadius: 0.06))
         base.geometry?.materials = [Look.stoneMaterial(Look.trim[side])]
@@ -456,9 +462,9 @@ final class CannonView {
         scene.rootNode.addChildNode(root)
     }
 
-    func pose(yaw: Double, dt: Float) {
-        let y = Float(yaw * .pi / 180)
-        yawNode.eulerAngles.y = side == 1 ? .pi - y : -y
+    /// Points the cannon `yaw` degrees off a heading (radians, from +x toward +z).
+    func pose(heading: Double, yaw: Double, dt: Float) {
+        yawNode.eulerAngles.y = -Float(heading + yaw * .pi / 180)
         kick *= exp(-7 * dt)
         barrel.position.x = -0.8 * kick
     }
@@ -479,6 +485,10 @@ final class World {
     private var pickupNode: SCNNode?
     private var pickupShown: Pickup?
     private var domes: [SCNNode] = []
+    private(set) var arena = Arena.duel
+    private var riverNodes: [SCNNode] = []
+    private var lakeNodes: [SCNNode] = []
+    private var earth: [SCNNode] = []
     private var clock: TimeInterval = 0
     private var sweep: TimeInterval = 0
     var onSplash: (() -> Void)?
@@ -487,8 +497,7 @@ final class World {
         buildSky()
         buildTerrain()
         buildScenery()
-        cannons = [CannonView(side: 0, scene: scene), CannonView(side: 1, scene: scene)]
-        domes = [makeDome(0), makeDome(1)]
+        setArena(.duel, force: true)
 
         ball.isHidden = true
         scene.rootNode.addChildNode(ball)
@@ -613,17 +622,20 @@ final class World {
         land.castsShadow = false
         scene.rootNode.addChildNode(land)
 
-        func slab(width: CGFloat, depth: CGFloat, y: Float, x: Float, material: SCNMaterial) {
+        @discardableResult
+        func slab(width: CGFloat, depth: CGFloat, y: Float, x: Float, z: Float = 0, material: SCNMaterial) -> SCNNode {
             let plane = SCNPlane(width: width, height: depth)
             plane.materials = [material]
             let n = SCNNode(geometry: plane)
             n.eulerAngles.x = -.pi / 2
-            n.position = SCNVector3(x, y, 0)
+            n.position = SCNVector3(x, y, z)
             n.castsShadow = false
             scene.rootNode.addChildNode(n)
+            return n
         }
         // River: sandy banks under a reflective, slowly moving surface.
-        slab(width: CGFloat(K.river * 2 + 5), depth: 1300, y: 0.02, x: 0, material: Look.solid(0xb9a77c, roughness: 1))
+        let sand = Look.solid(0xb9a77c, roughness: 1)
+        riverNodes.append(slab(width: CGFloat(K.river * 2 + 5), depth: 1300, y: 0.02, x: 0, material: sand))
         let water = SCNMaterial()
         water.lightingModel = .physicallyBased
         water.diffuse.contents = UIColor(hex: 0x1f5a7d)
@@ -640,10 +652,22 @@ final class World {
         flow.duration = 16
         flow.repeatCount = .infinity
         water.normal.addAnimation(flow, forKey: "flow")
-        slab(width: CGFloat(K.river * 2), depth: 1300, y: 0.06, x: 0, material: water)
-        // Packed earth under each castle.
-        let cx = Float(K.front + Double(K.gw) / 2)
-        for sx in [-cx, cx] { slab(width: CGFloat(K.gw + 8), depth: CGFloat(K.gd + 8), y: 0.03, x: sx, material: Look.solid(0x75684f, roughness: 1)) }
+        riverNodes.append(slab(width: CGFloat(K.river * 2), depth: 1300, y: 0.06, x: 0, material: water))
+        // A four-castle arena has a round lake in the middle instead.
+        for (r, y, m) in [(K.lake + 2.5, Float(0.02), sand), (K.lake, Float(0.06), water)] {
+            let disc = SCNNode(geometry: SCNCylinder(radius: CGFloat(r), height: 0.02))
+            (disc.geometry as? SCNCylinder)?.radialSegmentCount = 64
+            disc.geometry?.materials = [m]
+            disc.position = SCNVector3(0, y, 0)
+            disc.castsShadow = false
+            scene.rootNode.addChildNode(disc)
+            lakeNodes.append(disc)
+        }
+        // Packed earth under each castle seat.
+        let d = Float(K.front + Double(K.gw) / 2), dirt = Look.solid(0x75684f, roughness: 1)
+        let long = CGFloat(K.gw + 8), wide = CGFloat(K.gd + 8)
+        earth = [slab(width: long, depth: wide, y: 0.03, x: -d, material: dirt), slab(width: long, depth: wide, y: 0.03, x: d, material: dirt),
+                 slab(width: wide, depth: long, y: 0.03, x: 0, z: -d, material: dirt), slab(width: wide, depth: long, y: 0.03, x: 0, z: d, material: dirt)]
 
         let ground = SCNNode()
         ground.position = SCNVector3(0, -2, 0)
@@ -666,6 +690,7 @@ final class World {
             if abs(x) < 24 || (x * x + z * z).squareRoot() < 135 { continue }
             spots.append((x, z))
         }
+        spots.removeAll { abs($0.0) < 30 && abs($0.1) < 80 }      // keep clear of the north and south seats
         for (i, s) in spots.enumerated() {
             let k = 0.9 + Float((i * 37) % 10) / 14, y = World.height(s.0, s.1)
             // Parts are direct children: flattening does not carry transforms of geometry-less parents.
@@ -711,7 +736,21 @@ final class World {
 
     // MARK: Castles
 
+    /// Lays out the field for two or four castles: river or lake, cannons, shields and the ground under each seat.
+    func setArena(_ a: Arena, force: Bool = false) {
+        guard force || a != arena else { return }
+        arena = a
+        riverNodes.forEach { $0.isHidden = a.seats != 2 }
+        lakeNodes.forEach { $0.isHidden = a.seats == 2 }
+        for (i, n) in earth.enumerated() { n.isHidden = a.seats == 2 ? i > 1 : false }
+        cannons.forEach { $0.root.removeFromParentNode() }
+        domes.forEach { $0.removeFromParentNode() }
+        cannons = (0..<a.seats).map { CannonView(side: $0, arena: a, scene: scene) }
+        domes = (0..<a.seats).map { makeDome($0) }
+    }
+
     func load(_ battle: Battle) {
+        setArena(battle.arena)
         castleViews.forEach { $0.root.removeFromParentNode() }
         looseRoot.childNodes.forEach { $0.removeFromParentNode() }
         loose.removeAll(); rubble.removeAll()
@@ -722,7 +761,7 @@ final class World {
         hidePreview()
         showTarget(nil)
         showPickup(nil)
-        setShield(0, on: false); setShield(1, on: false)
+        for i in domes.indices { setShield(i, on: false) }
         scene.physicsWorld.speed = 1
     }
 
@@ -963,8 +1002,9 @@ final class World {
         m.blendMode = .add
         s.materials = [m]
         let n = SCNNode(geometry: s)
-        n.position = SCNVector3((side == 0 ? -1 : 1) * Float(K.front + Double(K.gw) / 2), 0, 0)
-        n.scale = SCNVector3(17, 21, 21)
+        let c = arena.castleCenter(side)
+        n.position = SCNVector3(Float(c.x), 0, Float(c.z))
+        n.scale = arena.forward(side).x != 0 ? SCNVector3(17, 21, 21) : SCNVector3(21, 21, 17)
         n.opacity = 0
         n.castsShadow = false
         n.renderingOrder = 20
@@ -1065,14 +1105,16 @@ final class World {
         for item in loose {
             let p = item.node.presentation.simdWorldPosition
             let age = clock - item.born
-            if p.y < 1.2 && abs(p.x) < Float(K.river) {              // sank in the river
+            if p.y < 1.2 && arena.isWater(Double(p.x), Double(p.z)) {              // sank in the water
                 burst(at: SIMD3(p.x, 0.3, p.z), colors: [0x8fc4e6, 0xffffff], count: 8, speed: 7, life: 0.8, size: 0.6, accel: -28, cone: true)
                 item.node.removeFromParentNode()
             } else if p.y < -3 || age > 30 {
                 item.node.removeFromParentNode()
             } else if age > 7 {
-                let ax = abs(p.x)
-                let inside = ax > Float(K.front) - 1 && ax < Float(K.xEdge) + 1 && abs(p.z) < Float(K.gd) / 2 + 1
+                let inside = castleViews.contains { v in
+                    let l = v.castle.local(Double(p.x), Double(p.z))
+                    return l.x > -1 && l.x < Double(K.gw) + 1 && l.z > -1 && l.z < Double(K.gd) + 1
+                }
                 if inside || item.decor {
                     // clear rubble off the castle so what is still standing stays readable
                     item.node.physicsBody = nil
