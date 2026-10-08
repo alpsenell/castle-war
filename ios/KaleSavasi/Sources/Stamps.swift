@@ -346,7 +346,7 @@ enum Presets {
         m.tower(x: 2, z: 24, courses: 4, material: .wood, roof: .pyramid, roofMaterial: .wood)
         m.tower(x: 18, z: 2, courses: 4, material: .wood, roof: .cone, roofMaterial: .wood)
         m.tower(x: 18, z: 24, courses: 4, material: .wood, roof: .cone, roofMaterial: .wood)
-        m.shrine(x: 9, z: 12, material: .wood, roof: .wood)
+        m.shrine(x: 9, z: 12, material: .stone, roof: .wood)
         m.heart(x: 11, z: 14)
         m.wall(x: 16, z: 10, length: 10, courses: 2, material: .stone)
         m.moat(x: 20, z: 6, length: 18)

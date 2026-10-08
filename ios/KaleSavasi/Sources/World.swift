@@ -184,7 +184,7 @@ final class CastleBricks {
         var out = home
         for i in out.poses.indices {
             guard let n = nodes[i] else { out.poses[i].hp = 0; continue }
-            let t = n.presentation
+            let t = n.awake ? n.presentation : n
             let q = rotation.inverse * t.simdWorldOrientation
             out.poses[i] = BrickPose(p: local(t.simdWorldPosition), q: q.vector, hp: Int8(n.hp))
         }
@@ -292,6 +292,7 @@ final class World {
     private var lakeNodes: [SCNNode] = []
     private var earth: [SCNNode] = []
     var clock: TimeInterval = 0
+    private var lockDepth = 0
     var onSplash: (() -> Void)?
     /// A brick broke (its material), a ball struck something (how hard), a heart or decoy was lost (castle, brick).
     var onBreak: ((BrickMaterial) -> Void)?
@@ -556,6 +557,7 @@ final class World {
     }
 
     func load(_ battle: Battle) {
+        lockScene(); defer { unlockScene() }
         setArena(battle.arena)
         endPlay()
         looseRoot.childNodes.forEach { $0.removeFromParentNode() }
@@ -571,6 +573,7 @@ final class World {
 
     /// Builder preview: swaps the left castle for a design in progress.
     func preview(_ design: CastleDesign) {
+        lockScene(); defer { unlockScene() }
         guard !castleViews.isEmpty else { return }
         castleViews[0].root.removeFromParentNode()
         castleViews[0].flat?.removeFromParentNode()
@@ -840,6 +843,17 @@ final class World {
     }
 
     // MARK: Per-frame upkeep
+
+    /// Holds off the render thread while bodies are added, swapped or removed; SceneKit's physics
+    /// step crashes on a body changed under it. Nested calls are counted.
+    func lockScene() {
+        if lockDepth == 0 { SCNTransaction.lock() }
+        lockDepth += 1
+    }
+    func unlockScene() {
+        lockDepth -= 1
+        if lockDepth == 0 { SCNTransaction.unlock() }
+    }
 
     func update(dt: TimeInterval) {
         clock += dt

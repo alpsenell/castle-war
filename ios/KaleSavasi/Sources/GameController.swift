@@ -1070,7 +1070,7 @@ final class GameController: NSObject, ObservableObject {
         if oppGone { h.turnText = Tx.opponentLeft } else {
             switch phase {
             case .flight: h.turnText = Tx.inFlight
-            case .impact: h.turnText = skipped ? Tx.timeUp : Tx.inFlight
+            case .impact: h.turnText = skipped ? Tx.timeUp : settling != nil ? Tx.settling : Tx.inFlight
             case .over: h.turnText = Tx.gameOver
             default:
                 switch driver {

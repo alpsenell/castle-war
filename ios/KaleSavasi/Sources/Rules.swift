@@ -31,7 +31,7 @@ enum K {
     static let repairShare = 0.12                    // share of a castle's mass a repair balloon puts back
     static let settleSeconds = 6.0                   // longest a shot's physics may run
     static let breakScale = 0.75                     // overall scale on `BrickMaterial.breakImpulse`
-    static let ballMass: Float = 28                  // a cannonball's mass in the physics world
+    static let ballMass: Float = 20                  // a cannonball's mass in the physics world
     static let maxChips = 90                         // fragments alive at once
     static let brickGravity = 20.0                  // the physics world's gravity, stronger than the flight's so bricks fall snappily
     static let rulesVersion = 5                      // bumped whenever an online match would play out differently
@@ -825,7 +825,7 @@ enum Difficulty: String, CaseIterable, Identifiable {
     var ammoChance: Double { self == .kolay ? 0.1 : self == .orta ? 0.22 : 0.35 }
     /// Bricks it weighs up before it picks one.
     var samples: Int { self == .kolay ? 2 : self == .orta ? 5 : 12 }
-    var heartChance: Double { self == .kolay ? 0.1 : self == .orta ? 0.2 : 0.3 }
+    var heartChance: Double { self == .kolay ? 0.06 : self == .orta ? 0.12 : 0.2 }
     var yawNoise: Double { self == .kolay ? 4.5 : self == .orta ? 2.0 : 0.7 }
     var speedNoise: Double { self == .kolay ? 0.07 : self == .orta ? 0.032 : 0.012 }
 }

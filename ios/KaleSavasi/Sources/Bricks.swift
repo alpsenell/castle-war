@@ -29,7 +29,7 @@ enum BrickMaterial: Int, CaseIterable, Identifiable {
     var id: Int { rawValue }
 
     /// Mass per brick unit of volume.
-    var density: Double { [0.6, 2.4, 0.9, 3.2, 1.6, 1.6][rawValue] }
+    var density: Double { [0.6, 2.4, 0.9, 3.2, 9.0, 9.0][rawValue] }
     /// Collision impulse (per unit of the brick's mass) that breaks one hit point.
     var breakImpulse: Double { [7.0, 14.0, 3.5, 16.0, 9.0, 9.0][rawValue] }
     /// Hits it survives; iron cracks on the first and breaks on the second.

@@ -478,4 +478,7 @@ enum Tx {
     static var target: String { p("Hedef", "Target") }
     static var botTag: String { p("bilgisayar", "computer") }
     static func playerLeft(_ name: String) -> String { p("\(name) ayrıldı, yerine bilgisayar oynuyor", "\(name) left; a computer takes over") }
+
+    // MARK: 2.0 physics
+    static var settling: String { p("Taşlar düşüyor…", "Bricks falling…") }
 }

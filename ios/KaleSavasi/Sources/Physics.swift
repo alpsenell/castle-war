@@ -76,6 +76,7 @@ extension World: BrickPhysics {
     // MARK: Castles
 
     func loadCastles(_ designs: [BrickDesign], poses: [CastleSnapshot]?) {
+        lockScene(); defer { unlockScene() }
         for v in castleViews { v.root.removeFromParentNode(); v.flat?.removeFromParentNode(); v.gems.forEach { $0.anchor.removeFromParentNode() } }
         castleViews = designs.enumerated().map { i, d in
             makeCastle(i, design: d, poses: poses.flatMap { i < $0.count && $0[i].poses.count == d.bricks.count ? $0[i] : nil } ?? CastleSnapshot(design: d))
@@ -205,6 +206,7 @@ extension World: BrickPhysics {
     // MARK: Playing a shot
 
     func simulate(_ impact: ShotImpact, timeout: Double, done: @escaping (SettleReport) -> Void) {
+        lockScene(); defer { unlockScene() }
         if play.active { finishPlay() }
         play.active = true
         play.t = 0; play.quiet = 0; play.frame = 0
@@ -304,6 +306,7 @@ extension World: BrickPhysics {
     /// Plays the shot forward one frame: breaks what was struck hard enough, watches the hearts,
     /// and ends the shot once nothing moves.
     func stepPlay(dt: TimeInterval) {
+        lockScene(); defer { unlockScene() }
         if play.frame >= 4 { for c in play.awake where !castleViews[c].gems.isEmpty { placeGems(castleViews[c]) } }
         ageChips()
         for k in contacts.drain() { knock(k) }
@@ -369,6 +372,7 @@ extension World: BrickPhysics {
 
     /// Ends whatever is being played without reporting it.
     func endPlay() {
+        lockScene(); defer { unlockScene() }
         play.active = false
         play.done = nil
         contacts.listening = false
@@ -422,7 +426,8 @@ extension World: BrickPhysics {
                 return
             }
         }
-        guard k.impulse >= n.threshold, clock - n.lastHit > 0.2 else { return }
+        // One knock takes one hit point; a heart or decoy loses at most one per blow.
+        guard k.impulse >= n.threshold, clock - n.lastHit > (n.brick.material.isCrystal ? 1.2 : 0.2) else { return }
         n.lastHit = clock
         n.hp -= 1
         if n.hp <= 0 { shatter(n) } else { crack(n) }
@@ -528,6 +533,7 @@ extension World: BrickPhysics {
     // MARK: Authoritative poses
 
     func adopt(_ snapshots: [CastleSnapshot], blend: Double) {
+        lockScene(); defer { unlockScene() }
         for (c, snap) in snapshots.enumerated() where c < castleViews.count {
             let v = castleViews[c]
             guard snap.poses.count == v.nodes.count else { continue }
@@ -568,6 +574,7 @@ extension World: BrickPhysics {
                 unflatten(v)
                 DispatchQueue.main.asyncAfter(deadline: .now() + blend + 0.1) { [weak self, weak v] in
                     guard let self, let v, !self.play.awake.contains(v.side), self.castleViews.contains(where: { $0 === v }) else { return }
+                self.lockScene(); defer { self.unlockScene() }
                     self.placeGems(v)
                     self.flatten(v)
                 }
@@ -601,11 +608,13 @@ extension World: BrickPhysics {
 
     /// Builder: lets the preview castle fall under gravity, then stands it back up.
     func testGravity(seconds: Double) {
+        lockScene(); defer { unlockScene() }
         guard let v = castleViews.first, !play.active else { return }
         unflatten(v)
         for case let n? in v.nodes where !n.brick.shape.isDecal { n.physicsBody = body(for: n, dynamic: true) }
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self, weak v] in
             guard let self, let v, self.castleViews.first === v else { return }
+            self.lockScene(); defer { self.unlockScene() }
             for case let n? in v.nodes {
                 let w = v.worldPose(v.home.poses[n.index])
                 n.physicsBody = nil
