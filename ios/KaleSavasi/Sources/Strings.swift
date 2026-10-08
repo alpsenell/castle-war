@@ -478,4 +478,99 @@ enum Tx {
     static var target: String { p("Hedef", "Target") }
     static var botTag: String { p("bilgisayar", "computer") }
     static func playerLeft(_ name: String) -> String { p("\(name) ayrıldı, yerine bilgisayar oynuyor", "\(name) left; a computer takes over") }
+
+    // MARK: 2.0 builder
+    static func brickProblem(_ pr: BrickProblem) -> String {
+        switch pr {
+        case .overlap: return p("Tuğlalar iç içe geçiyor.", "Some bricks overlap.")
+        case .outOfBounds: return p("Bir tuğla arsanın dışında.", "A brick is outside the plot.")
+        case .floating: return p("Kırmızı tuğlaların altında hiçbir şey yok.", "The red bricks have nothing under them.")
+        case .noHeart: return p("Kalbi yerleştir: korunacak tek şey o.", "Place the heart: it is what you defend.")
+        case .manyHearts: return p("Yalnızca bir kalp olabilir.", "Only one heart is allowed.")
+        case .manyDecoys: return p("En çok \(BK.maxDecoys) sahte kalp olabilir.", "At most \(BK.maxDecoys) decoy hearts.")
+        case .overBudget: return p("Altın sınırı aşıldı.", "Over the coin limit.")
+        case .tooSmall: return p("Kale çok küçük: en az \(BK.minimum) altınlık tuğla kullan.", "Too small: spend at least \(BK.minimum) coins on bricks.")
+        case .tooMany: return p("En çok \(BK.maxBricks) tuğla olabilir.", "At most \(BK.maxBricks) bricks.")
+        }
+    }
+    static var builderReady: String { p("Kale hazır. Kaydet ya da yerçekimini dene.", "Ready to save. Try Test gravity first.") }
+    static var builderHint3D: String { p("Bir parça seç, zemine ya da bir tuğlanın üstüne dokun.", "Pick a piece, then tap the ground or the top of a brick.") }
+    static var eraseHint: String { p("Silmek için bir tuğlaya dokun.", "Tap a brick to remove it.") }
+    static var lookHint: String { p("Sürükle: çevir · iki parmak: kaydır, yakınlaş", "Drag to orbit · two fingers to pan and zoom") }
+    static var noCoins: String { p("Yeterli altın yok", "Not enough coins") }
+    static var tooHigh: String { p("Kale bu kadar yükselemez", "That is above the height limit") }
+    static var offPlot: String { p("Arsanın dışında", "Outside the plot") }
+    static var aboveLayer: String { p("Kat sınırının üstünde", "Above the layer limit") }
+    static var onMoat: String { p("Hendeğin üstüne bir şey konmaz", "Nothing can stand in a moat") }
+    static var onRoof: String { p("Çatının üstüne bir şey konmaz", "Nothing can stand on a roof") }
+    static var roofMaterials: String { p("Çatılar demirden olmaz; taş kullanılır.", "Roofs cannot be iron; stone is used.") }
+    static var testGravity: String { p("Yerçekimi", "Test gravity") }
+    static var gravityRunning: String { p("Yerçekimi deneniyor…", "Testing gravity…") }
+    static var gravityStands: String { p("Kale ayakta kaldı!", "Your castle stands firm!") }
+    static func gravityFell(_ n: Int) -> String { p("\(n) tuğla yerinden oynadı. Altlarını destekle.", n == 1 ? "1 brick moved. Give it better support." : "\(n) bricks moved. Give them better support.") }
+    static var undo: String { p("Geri al", "Undo") }
+    static var redo: String { p("Yinele", "Redo") }
+    static var rotate: String { p("Döndür", "Rotate") }
+    static var build: String { p("Kur", "Build") }
+    static var look: String { p("Bak", "Look") }
+    static var layer: String { p("Kat", "Layer") }
+    static var paste: String { p("Yapıştır", "Paste") }
+    static var coins: String { p("Altın", "Coins") }
+    static var bricks: String { p("Tuğla", "Bricks") }
+    static var stamps: String { p("Kalıplar", "Stamps") }
+    static var castles: String { p("Kaleler", "Castles") }
+    static func castleNumber(_ n: Int) -> String { p("Kale \(n)", "Castle \(n)") }
+    static var decoy: String { p("Sahte kalp", "Decoy") }
+    static var heartTool: String { p("Kalp", "Heart") }
+    static var front3D: String { p("ÖN", "FRONT") }
+    static func material(_ m: BrickMaterial) -> String {
+        switch m {
+        case .wood: return p("Ahşap", "Wood")
+        case .stone: return p("Taş", "Stone")
+        case .ice: return p("Buz", "Ice")
+        case .iron: return p("Demir", "Iron")
+        case .heart: return p("Kalp", "Heart")
+        case .decoy: return p("Sahte kalp", "Decoy")
+        }
+    }
+    static func materialInfo(_ m: BrickMaterial) -> String {
+        switch m {
+        case .wood: return p("Hafif ve ucuz", "Light and cheap")
+        case .stone: return p("Ağır ve sağlam", "Heavy and sturdy")
+        case .ice: return p("Hafif ama kırılgan", "Light but brittle")
+        case .iron: return p("İki darbe dayanır", "Takes two hits")
+        default: return ""
+        }
+    }
+    static func shape(_ s: BrickShape) -> String {
+        switch s {
+        case .cube: return p("Küp", "Cube")
+        case .half: return p("Yarım", "Half")
+        case .beam2: return p("Kiriş 2", "Beam 2")
+        case .beam3: return p("Kiriş 3", "Beam 3")
+        case .beam4: return p("Kiriş 4", "Beam 4")
+        case .plank: return p("Kalas", "Plank")
+        case .pillar2: return p("Sütun 2", "Pillar 2")
+        case .pillar3: return p("Sütun 3", "Pillar 3")
+        case .wedge: return p("Rampa", "Wedge")
+        case .arch: return p("Kemer", "Arch")
+        case .coneRoof: return p("Külah çatı", "Cone roof")
+        case .pyramidRoof: return p("Piramit çatı", "Pyramid roof")
+        case .battlement: return p("Mazgal", "Battlement")
+        case .window: return p("Pencere", "Window")
+        case .moat: return p("Hendek", "Moat")
+        }
+    }
+    static func stamp(_ s: Stamp) -> String {
+        switch s {
+        case .wall: return p("Duvar", "Wall")
+        case .tallWall: return p("Yüksek duvar", "Tall wall")
+        case .tower: return p("Kule", "Tower")
+        case .tallTower: return p("Yüksek kule", "Tall tower")
+        case .keep: return p("İç kale", "Keep")
+        case .gatehouse: return p("Kapı kulesi", "Gatehouse")
+        case .shrine: return p("Mabet", "Shrine")
+        case .bridge: return p("Köprü", "Bridge")
+        }
+    }
 }

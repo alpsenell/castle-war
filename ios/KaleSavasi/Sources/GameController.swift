@@ -110,11 +110,23 @@ final class GameController: NSObject, ObservableObject {
     @Published var profile = Profile.load()
     @Published var language = Tx.lang { didSet { Tx.set(language); refreshHUD() } }
     @Published var confirmQuit = false
-    // Castle builder
-    @Published var draft = CastleDesign()
-    @Published var tool: PieceKind? = .wallLow
-    @Published var erasing = false
+    // Castle builder (actions in GameController+Builder.swift)
+    @Published var draft = BrickDesign()
+    @Published var buildTool = BuildTool.brick
+    @Published var buildShape = BrickShape.cube
+    @Published var buildMaterial = BrickMaterial.stone
+    @Published var buildStamp = Stamp.tower
+    @Published var buildRot = 0
+    /// Levels shown and buildable, in brick units.
+    @Published var buildLayer = BK.height
     @Published var builderNote: String?
+    @Published var undoStack: [BrickDesign] = []
+    @Published var redoStack: [BrickDesign] = []
+    @Published var testingGravity = false
+    var bench: BuildBench?
+    var buildGesture = BuildGesture.idle
+    var buildCam = BuildCam()
+    var buildNoteWork: DispatchWorkItem?
     /// The final, heart-breaking shot is playing out in slow motion.
     @Published var finale = false
     var viewSize = CGSize(width: 844, height: 390)
@@ -144,7 +156,6 @@ final class GameController: NSObject, ObservableObject {
     /// Who the online opponent says they are, and the castle they brought.
     private var rival: (name: String, trophies: Int, level: Int, design: CastleDesign)?
     private var toastWork: DispatchWorkItem?
-    var lastTile: (Int, Int)?
     // Gauntlet run
     private var gauntletRound = 1
     private var gauntletSeed: UInt32 = 0
@@ -213,6 +224,7 @@ final class GameController: NSObject, ObservableObject {
         if ProcessInfo.processInfo.arguments.contains("-autoNearby") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.playOnline(.nearby) }
         }
+        builderLaunchHooks()
         #endif
     }
 
@@ -231,7 +243,7 @@ final class GameController: NSObject, ObservableObject {
     /// The scene behind the menu: the player's own castle facing a random one.
     func resetBackdrop() {
         let seed = UInt32.random(in: 0...UInt32.max)
-        battle = Battle(seed: seed, first: 0, designs: [profile.castle, Presets.pick(seed)])
+        battle = Battle(seed: seed, first: 0, designs: [profile.legacyCastle, Presets.pick(seed)])
         world.load(battle)
     }
 
@@ -245,7 +257,7 @@ final class GameController: NSObject, ObservableObject {
         sfx.play(.tick)
         let seed = UInt32.random(in: 0...UInt32.max)
         aiLevel = difficulty
-        startGame(.ai, seed: seed, designs: [profile.castle, Presets.pick(seed)])
+        startGame(.ai, seed: seed, designs: [profile.legacyCastle, Presets.pick(seed)])
     }
 
     func playGauntlet() {
@@ -259,7 +271,7 @@ final class GameController: NSObject, ObservableObject {
     private func startGauntletRound() {
         let foe = Gauntlet.foe(round: gauntletRound, seed: gauntletSeed)
         aiLevel = foe.difficulty
-        startGame(.gauntlet, seed: gauntletSeed &+ UInt32(gauntletRound), designs: [profile.castle, foe.design], rules: MatchRules(foe.modifier), carry: gauntletCarry)
+        startGame(.gauntlet, seed: gauntletSeed &+ UInt32(gauntletRound), designs: [profile.legacyCastle, foe.design], rules: MatchRules(foe.modifier), carry: gauntletCarry)
         if foe.modifier == .none { show(toast: Tx.gauntletRound(gauntletRound)) }
     }
 
@@ -268,7 +280,7 @@ final class GameController: NSObject, ObservableObject {
         guard let d = CastleCode.decode(code) else { show(toast: Tx.codeInvalid); sfx.play(.thud); return }
         sfx.play(.tick)
         aiLevel = difficulty
-        startGame(.ai, designs: [profile.castle, d], friend: d)
+        startGame(.ai, designs: [profile.legacyCastle, d], friend: d)
     }
 
     /// Four castles: the player against three computers.
@@ -277,7 +289,7 @@ final class GameController: NSObject, ObservableObject {
         stopNet()
         aiLevel = difficulty
         var picks = Presets.all.shuffled()
-        seats = [SeatInfo(nonce: 0, name: Tx.you, level: profile.level, design: profile.castle.encoded)]
+        seats = [SeatInfo(nonce: 0, name: Tx.you, level: profile.level, design: profile.legacyCastle.encoded)]
         for i in 1..<4 { seats.append(SeatInfo(nonce: 0, name: Tx.seatName(i), level: 1, design: picks.removeFirst().encoded)) }
         startParty(seed: UInt32.random(in: 0...UInt32.max), me: 0, first: Int.random(in: 0..<4), round: 1)
     }
@@ -291,20 +303,20 @@ final class GameController: NSObject, ObservableObject {
         show(toast: Tx.partyTitle)
     }
 
-    func playLocal() { sfx.play(.tick); startGame(.local, designs: [profile.castle, profile.castle]) }
+    func playLocal() { sfx.play(.tick); startGame(.local, designs: [profile.legacyCastle, profile.legacyCastle]) }
 
     func playSiege() {
         sfx.play(.tick)
         let seed = Challenge.seed(day: Profile.dayString())
         let twist = Modifier.allCases[Int((seed / 7) % UInt32(Modifier.allCases.count))]
-        startGame(.challenge, seed: seed, designs: [profile.castle, Presets.pick(seed)], rules: MatchRules(twist, pickups: false))
+        startGame(.challenge, seed: seed, designs: [profile.legacyCastle, Presets.pick(seed)], rules: MatchRules(twist, pickups: false))
     }
 
     func playStage(_ s: Stage) {
         guard profile.isOpen(s) else { return }
         sfx.play(.tick)
         aiLevel = s.difficulty
-        startGame(.campaign, designs: [profile.castle, s.design], rules: MatchRules(s.modifier), stage: s)
+        startGame(.campaign, designs: [profile.legacyCastle, s.design], rules: MatchRules(s.modifier), stage: s)
     }
 
     func playOnline(_ kind: OnlineKind) {
@@ -378,10 +390,10 @@ final class GameController: NSObject, ObservableObject {
         case .campaign:
             if over?.hasNextStage == true { playStage(profile.nextStage) } else if let s = stage { playStage(s) }
         case .ai:
-            if let d = friendDesign { aiLevel = difficulty; startGame(.ai, designs: [profile.castle, d], friend: d) } else { playComputer() }
+            if let d = friendDesign { aiLevel = difficulty; startGame(.ai, designs: [profile.legacyCastle, d], friend: d) } else { playComputer() }
         case .gauntlet:
             if over?.gauntletNext == true { gauntletRound += 1; startGauntletRound() } else { playGauntlet() }
-        case .local: startGame(.local, first: 1 - battle.first, designs: [profile.castle, profile.castle])
+        case .local: startGame(.local, first: 1 - battle.first, designs: [profile.legacyCastle, profile.legacyCastle])
         case .party:
             if net == nil { playParty() }
             else if isHost { hostParty() }
@@ -971,7 +983,7 @@ final class GameController: NSObject, ObservableObject {
     }
 
     private func sendHello() {
-        net?.send(NetMessage(t: "hello", nonce: myNonce, name: profile.name, trophies: profile.trophies, level: profile.level, design: profile.castle.encoded,
+        net?.send(NetMessage(t: "hello", nonce: myNonce, name: profile.name, trophies: profile.trophies, level: profile.level, design: profile.legacyCastle.encoded,
                              rules: K.rulesVersion), reliable: true)
     }
 
@@ -1006,7 +1018,7 @@ final class GameController: NSObject, ObservableObject {
         isHost = true
         round += 1
         if round == 1 {
-            seats = [SeatInfo(nonce: myNonce, name: profile.name, level: profile.level, design: profile.castle.encoded)]
+            seats = [SeatInfo(nonce: myNonce, name: profile.name, level: profile.level, design: profile.legacyCastle.encoded)]
             seats += partyPeers.values.sorted { $0.nonce < $1.nonce }.prefix(3)
             var picks = Presets.all.shuffled()
             while seats.count < 4 { seats.append(SeatInfo(nonce: 0, name: Tx.seatName(seats.count), level: 1, design: picks.removeFirst().encoded)) }
@@ -1088,7 +1100,7 @@ final class GameController: NSObject, ObservableObject {
         round += 1
         let seed = UInt32.random(in: 0...UInt32.max), first = (round + 1) % 2
         net?.send(NetMessage(t: "start", seed: seed, round: round, first: first), reliable: true)
-        startGame(.online, seed: seed, me: 0, first: first, round: round, designs: [profile.castle, rival?.design ?? .classic])
+        startGame(.online, seed: seed, me: 0, first: first, round: round, designs: [profile.legacyCastle, rival?.design ?? .classic])
         announceRival()
     }
 
@@ -1119,7 +1131,7 @@ final class GameController: NSObject, ObservableObject {
             if isHost && round == 0 { hostNewRound() }
         case "start":
             guard !isHost, let seed = m.seed, let r = m.round, let first = m.first, first == 0 || first == 1 else { return }
-            startGame(.online, seed: seed, me: 1, first: first, round: r, designs: [rival?.design ?? .classic, profile.castle])
+            startGame(.online, seed: seed, me: 1, first: first, round: r, designs: [rival?.design ?? .classic, profile.legacyCastle])
             announceRival()
         case "aim":
             guard phase == .aim, driver == .remote, let y = m.yaw, let p = m.power, y.isFinite, p.isFinite else { return }
@@ -1304,17 +1316,14 @@ final class GameController: NSObject, ObservableObject {
             tLook.y = 4.2
             k = 4.5
             wantFov = 46
+        case .target where screen == .builder:
+            (tPos, tLook) = builderCamera()
+            k = 9
         case .target:
             if phase == .over { orbitA += dt * 0.12 }
             let c = battle.arena.castleCenter(min(viewSeat, battle.castles.count - 1)).f
             tPos = SIMD3(c.x + Float(cos(orbitA) * orbitR), Float(orbitH), c.z + Float(sin(orbitA) * orbitR))
             tLook = SIMD3(c.x, 7, c.z)
-            if screen == .builder {
-                // The grid covers the left of the screen, so frame the castle in the right half.
-                let f = simd_normalize(SIMD3<Float>(tLook.x - tPos.x, 0, tLook.z - tPos.z))
-                let left = SIMD3<Float>(f.z, 0, -f.x) * Float(orbitR) * 0.3
-                tPos += left; tLook += left
-            }
             k = 4
         case .follow:
             let b = world.ball.simdPosition, d = ballDir

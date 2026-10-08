@@ -22,11 +22,13 @@
 		C8B7FA012529A7259C16C192 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F9AFA7634DE71857938BFD35 /* Assets.xcassets */; };
 		DB94CEBD5EF3DA262C4EF53E /* GameController+Builder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2517B286CCDCB293EA20E78D /* GameController+Builder.swift */; };
 		DDC3CF3096FCB62119A012FD /* Bricks.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3C9AA6B945C584FB7A351AA /* Bricks.swift */; };
+		E121CA59FBFEE3E36A593DB1 /* World+Builder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 181CA527699AF2B160B039BB /* World+Builder.swift */; };
 		E176E306895D1C359BE2B975 /* Sfx.swift in Sources */ = {isa = PBXBuildFile; fileRef = 930588B241A4AEA001E25EF6 /* Sfx.swift */; };
 		E25292221B0D944D4CCD3A03 /* Profile.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFB2E22A6C6B4617463F7EEF /* Profile.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		181CA527699AF2B160B039BB /* World+Builder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "World+Builder.swift"; sourceTree = "<group>"; };
 		2517B286CCDCB293EA20E78D /* GameController+Builder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GameController+Builder.swift"; sourceTree = "<group>"; };
 		5469E465B403D15E28ADE431 /* Views.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views.swift; sourceTree = "<group>"; };
 		7DD7CDDBC7ED7B47F2FA8A7B /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
@@ -68,6 +70,7 @@
 				823D0CAB0929129EF535EA92 /* Textures.swift */,
 				5469E465B403D15E28ADE431 /* Views.swift */,
 				914D6F007EA7A24B1C52E564 /* World.swift */,
+				181CA527699AF2B160B039BB /* World+Builder.swift */,
 				38B5CCF673CF05A36471F7A4 /* InfoPlist.strings */,
 			);
 			path = Sources;
@@ -176,6 +179,7 @@
 				691CC73C55EF7408772C48F2 /* Strings.swift in Sources */,
 				560C95447A93674971F0F60C /* Textures.swift in Sources */,
 				58C6A4F8294C72D4837E4E97 /* Views.swift in Sources */,
+				E121CA59FBFEE3E36A593DB1 /* World+Builder.swift in Sources */,
 				51BE5FE3798D9EFA42295B05 /* World.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

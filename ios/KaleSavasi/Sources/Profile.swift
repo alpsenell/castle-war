@@ -197,7 +197,7 @@ struct Profile: Codable, Equatable {
     var ballStyle = 0
     var siegeDay = "", siegeBest = 0, siegeRecord = 0
     var missionDay = "", missionProgress: [String: Int] = [:], missionsDone: [String] = []
-    /// The player's castle in its flat form; empty means the classic layout.
+    /// The player's castle in its flat form (`BrickDesign.encoded`, or tile pieces in older saves); empty means the classic layout.
     var design: [Int] = []
     /// Best stars per campaign stage, in stage order.
     var stars: [Int] = []
@@ -262,8 +262,27 @@ struct Profile: Codable, Equatable {
         return fresh
     }
 
-    /// The castle the player takes into battle.
-    var castle: CastleDesign { CastleDesign.migrating(encoded: design) ?? .classic }
+    /// The player's castle in bricks. Saves from before bricks (tile pieces) are rebuilt from
+    /// stamps; an empty save is the classic castle.
+    var castle: BrickDesign {
+        if let d = Profile.savedBricks(design) { return d }
+        return BrickDesign(legacy: CastleDesign.migrating(encoded: design) ?? .classic)
+    }
+
+    /// Temporary bridge for match code that still plays tile castles: the tile castle of an old
+    /// save, otherwise the classic one. Remove once matches read `castle`.
+    var legacyCastle: CastleDesign { CastleDesign.migrating(encoded: design) ?? .classic }
+
+    /// Reads a saved brick castle without judging it, so a castle saved under older limits still opens.
+    private static func savedBricks(_ e: [Int]) -> BrickDesign? {
+        guard e.count >= 2, e[0] == BrickDesign.format, (e.count - 2) % 6 == 0, let h = HeartKind(rawValue: e[1]) else { return nil }
+        var d = BrickDesign(heart: h)
+        for i in stride(from: 2, to: e.count, by: 6) {
+            guard let s = BrickShape(rawValue: e[i]), let m = BrickMaterial(rawValue: e[i + 1]) else { return nil }
+            d.bricks.append(PlacedBrick(shape: s, material: m, x: e[i + 2], y: e[i + 3], z: e[i + 4], rot: e[i + 5] & 3))
+        }
+        return d
+    }
 
     var totalStars: Int { stars.reduce(0, +) }
     func stars(for stage: Stage) -> Int { stage.id - 1 < stars.count ? stars[stage.id - 1] : 0 }
