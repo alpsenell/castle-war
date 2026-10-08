@@ -18,7 +18,7 @@ enum BK {
     static var maxY: Int { height * steps }
     static var maxZ: Int { width * steps }
     static let maxBricks = 260
-    static let budget = 2400, minimum = 1200           // coins
+    static let budget = 3600, minimum = 900            // coins
     static let maxDecoys = 2
     /// World size of one snap step.
     static var step: Double { unit / Double(steps) }
@@ -35,7 +35,7 @@ enum BrickMaterial: Int, CaseIterable, Identifiable {
     /// Hits it survives; iron cracks on the first and breaks on the second.
     var hp: Int { self == .iron ? 2 : 1 }
     /// Coins per brick unit of volume.
-    var cost: Double { [10, 24, 14, 40, 0, 60][rawValue] }
+    var cost: Double { [6, 9, 7, 15, 0, 25][rawValue] }
     var isCrystal: Bool { self == .heart || self == .decoy }
     /// Materials a player can pick in the builder tray (hearts and decoys are their own tools).
     static let buildable: [BrickMaterial] = [.wood, .stone, .ice, .iron]
@@ -208,7 +208,7 @@ struct CastleSnapshot: Equatable {
         poses = design.bricks.map { b in
             let c = b.center
             let a = Float(b.rot) * .pi / 2
-            return BrickPose(p: SIMD3(Float(c.x), Float(c.y), Float(c.z)), q: SIMD4(0, sin(a / 2), 0, cos(a / 2)), hp: Int8(b.material.hp))
+            return BrickPose(p: SIMD3(Float(c.x), Float(c.y), Float(c.z)), q: SIMD4(0, sin(a / 2), 0, cos(a / 2)), hp: Int8(design.hp(b)))
         }
     }
     init(poses: [BrickPose]) { self.poses = poses }
@@ -263,6 +263,7 @@ struct ShotImpact {
     var crit: Bool
     var shielded: [Bool]           // per castle: incoming impulses are scaled by K.shieldFactor
     var extraBalls: [(point: Vec3, velocity: Vec3)] = []   // cluster shot: the other two balls
+    var weight = 1.0               // match twist on the ball's mass (`MatchRules.blastScale`)
 }
 
 /// The settled result of one shot, produced by the physics world on the shooter's device and
