@@ -559,6 +559,7 @@ struct CloseButton: View {
 /// A modal card over a dimmed scene. Springs in when it appears.
 struct Card<Content: View>: View {
     var width: CGFloat = 680
+    var inset: CGFloat = 19
     @ViewBuilder var content: Content
     @State private var shown = false
     @Environment(\.accessibilityReduceMotion) private var still
@@ -566,7 +567,7 @@ struct Card<Content: View>: View {
         ZStack {
             Color.black.opacity(shown ? 0.38 : 0).ignoresSafeArea()
             content
-                .padding(.horizontal, 24.u).padding(.vertical, 19.u)
+                .padding(.horizontal, 24.u).padding(.vertical, inset.u)
                 .frame(maxWidth: width.u)
                 .background(FramedPanel())
                 .padding(12)

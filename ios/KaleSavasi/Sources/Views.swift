@@ -481,7 +481,7 @@ struct HUDView: View {
                 }
             }
         }
-        .padding(.top, 10).padding(.bottom, 6).padding(.horizontal, 8)
+        .padding(.top, Theme.roomy ? 18 : 10).padding(.bottom, Theme.roomy ? 16 : 6).padding(.horizontal, Theme.roomy ? 20 : 8)
     }
 
     /// Four castles: two small plates on each side of the turn plate.

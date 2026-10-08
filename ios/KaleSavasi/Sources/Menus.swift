@@ -421,7 +421,7 @@ struct HowToView: View {
                     }
                     .padding(.bottom, 4)
                 }
-                .frame(maxHeight: 226.u)
+                .frame(maxHeight: (Theme.roomy ? 380 : 226).u)
                 Button { game.closeHowTo() } label: { Label(Tx.gotIt, systemImage: "checkmark") }
                     .buttonStyle(ThemeButtonStyle(tone: .green, size: 16, fill: false))
                     .frame(maxWidth: .infinity)
@@ -478,7 +478,7 @@ struct AchievementsView: View {
                     }
                     .padding(.bottom, 4)
                 }
-                .frame(maxHeight: 270.u)
+                .frame(maxHeight: (Theme.roomy ? 330 : 270).u)
             }
         }
     }
@@ -1081,7 +1081,7 @@ struct OverView: View {
     var body: some View {
         let o = game.over
         let outcome = o?.outcome ?? .neutral
-        Card(width: 660) {
+        Card(width: 660, inset: Theme.roomy ? 19 : 14) {
             VStack(spacing: 6.u) {
                 Ribbon(tone: outcome == .win ? .gold : outcome == .loss ? .stone : .blue) {
                     Text(outcome == .win ? Tx.victory : outcome == .loss ? Tx.defeat : (o?.title ?? ""))
@@ -1089,7 +1089,8 @@ struct OverView: View {
                         .lineLimit(1).minimumScaleFactor(0.6)
                 }
                 .frame(maxWidth: 420.u)
-                .padding(.top, -44.u)
+                .padding(.top, -40.u)
+                .padding(.bottom, 6.u)
                 if let stars = o?.reward?.stars { StarPop(earned: stars) }
                 VStack(spacing: 2.u) {
                     if outcome != .neutral, let t = o?.title, t != Tx.won, t != Tx.lost {
