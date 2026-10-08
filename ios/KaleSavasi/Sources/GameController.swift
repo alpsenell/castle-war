@@ -90,7 +90,7 @@ struct Lobby: Equatable {
 /// Runs the match: whose turn it is, shots, the cameras and what the HUD shows.
 final class GameController: NSObject, ObservableObject {
     let world = World()
-    private let sfx = Sfx()
+    let sfx = Sfx()
 
     @Published var screen = Screen.menu
     @Published var panel = Panel.home
@@ -121,7 +121,7 @@ final class GameController: NSObject, ObservableObject {
 
     private enum Phase { case menu, aim, flight, impact, over }
     private enum Driver { case human, computer, remote }
-    private enum Cam { case menu, aim, target, follow, impact, finale }
+    enum Cam { case menu, aim, target, follow, impact, finale }
     private struct Flight { var side: Int; var res: ShotResult; var path: [Vec3]; var i = 0.0; var popped = false; var final = false }
 
     private var mode = Mode.ai
@@ -144,7 +144,7 @@ final class GameController: NSObject, ObservableObject {
     /// Who the online opponent says they are, and the castle they brought.
     private var rival: (name: String, trophies: Int, level: Int, design: CastleDesign)?
     private var toastWork: DispatchWorkItem?
-    private var lastTile: (Int, Int)?
+    var lastTile: (Int, Int)?
     // Gauntlet run
     private var gauntletRound = 1
     private var gauntletSeed: UInt32 = 0
@@ -165,14 +165,14 @@ final class GameController: NSObject, ObservableObject {
     private var lastSeen: [UInt32: Double] = [:]
     private var pingT = 0.0, clock = 0.0
     /// The castle the inspect and end-of-match cameras circle.
-    private var viewSeat = 1
+    var viewSeat = 1
 
-    private var cam = Cam.menu
+    var cam = Cam.menu
     private var camSide = 0
-    private var menuA = 0.7, orbitA = 0.0, orbitH = 28.0, orbitR = 56.0, orbitR0 = 56.0, impactA = 0.0, shake = 0.0
+    var menuA = 0.7, orbitA = 0.0, orbitH = 28.0, orbitR = 56.0, orbitR0 = 56.0, impactA = 0.0, shake = 0.0
     private var lastDrag: CGPoint?
     private var impactP = SIMD3<Float>(0, 0, 0), impactDir = SIMD3<Float>(1, 0, 0), ballDir = SIMD3<Float>(1, 0, 0)
-    private var camPos = SIMD3<Float>(100, 46, 100), camLook = SIMD3<Float>(0, 7, 0)
+    var camPos = SIMD3<Float>(100, 46, 100), camLook = SIMD3<Float>(0, 7, 0)
     private var fov: Float = 50
     private var link: CADisplayLink?
     private var lastTime: CFTimeInterval = 0
@@ -229,13 +229,13 @@ final class GameController: NSObject, ObservableObject {
     }
 
     /// The scene behind the menu: the player's own castle facing a random one.
-    private func resetBackdrop() {
+    func resetBackdrop() {
         let seed = UInt32.random(in: 0...UInt32.max)
         battle = Battle(seed: seed, first: 0, designs: [profile.castle, Presets.pick(seed)])
         world.load(battle)
     }
 
-    private func thump(_ style: UIImpactFeedbackGenerator.FeedbackStyle) {
+    func thump(_ style: UIImpactFeedbackGenerator.FeedbackStyle) {
         if profile.haptics { UIImpactFeedbackGenerator(style: style).impactOccurred() }
     }
 
@@ -448,104 +448,6 @@ final class GameController: NSObject, ObservableObject {
     func closeHowTo() {
         if !profile.seenHowTo { profile.seenHowTo = true; profile.save() }
         panel = .home
-    }
-
-    // MARK: Castle builder
-
-    func openBuilder() {
-        sfx.play(.tick)
-        draft = profile.castle
-        tool = .wallLow; erasing = false; builderNote = nil; lastTile = nil
-        screen = .builder
-        cam = .target
-        viewSeat = 0
-        orbitA = 0.75; orbitH = 30; orbitR = 54; orbitR0 = 54
-        world.preview(draft)
-    }
-
-    func pick(tool kind: PieceKind?) {
-        guard kind == nil || profile.owns(kind!) else { builderNote = Tx.needStars(Profile.starsNeeded(kind!)); return }
-        tool = kind
-        erasing = kind == nil
-        builderNote = nil
-        sfx.play(.tick)
-    }
-
-    /// A touch on the builder grid. `fresh` is the first touch of a stroke; dragging on only lays walls or erases.
-    func paint(row: Int, col: Int, fresh: Bool) {
-        guard screen == .builder, row >= 0, row < CastleDesign.rows, col >= 0, col < CastleDesign.cols else { return }
-        if !fresh, let t = lastTile, t == (row, col) { return }
-        lastTile = (row, col)
-        if erasing {
-            if let i = draft.piece(atRow: row, col: col) { draft.pieces.remove(at: i); draftChanged() }
-            return
-        }
-        guard let kind = tool else { return }
-        if !fresh && kind.span > 1 { return }
-        let n = kind.span
-        let tx = min(max(row - (n - 1) / 2, 0), CastleDesign.rows - n), tz = min(max(col - (n - 1) / 2, 0), CastleDesign.cols - n)
-        var next = draft
-        if n == 1, let i = next.piece(atRow: row, col: col) {
-            let old = next.pieces[i]
-            if old.kind == kind { if fresh { next.pieces.remove(at: i); draft = next; draftChanged() }; return }   // tap again to take it away
-            guard old.kind.span == 1 else { if fresh { builderNote = Tx.noRoom }; return }
-            next.pieces.remove(at: i)                                                                              // swap one wall for the other
-        }
-        if kind == .keep || kind == .heart { next.pieces.removeAll { $0.kind == kind } }      // only one of each: placing it again moves it
-        guard next.fits(kind, row: tx, col: tz) else { if fresh { builderNote = Tx.noRoom }; return }
-        next.pieces.append(Piece(kind: kind, tx: tx, tz: tz))
-        guard next.cost <= CastleDesign.budget else { builderNote = Tx.noStone; return }
-        guard next.decoys <= CastleDesign.maxDecoys else { builderNote = Tx.problem(.manyDecoys); return }
-        draft = next
-        draftChanged()
-    }
-
-    func strokeEnded() { lastTile = nil }
-
-    private func draftChanged() {
-        builderNote = nil
-        world.preview(draft)
-    }
-
-    func loadDraft(_ d: CastleDesign) { draft = d; draftChanged(); sfx.play(.tick) }
-
-    func pick(heart h: HeartKind) {
-        guard profile.owns(h) else { builderNote = Tx.heartLocked(h.level); return }
-        var next = draft
-        next.heart = h
-        guard next.cost <= CastleDesign.budget else { builderNote = Tx.noStone; return }
-        draft = next
-        draftChanged()
-        builderNote = Tx.heart(h) + ": " + Tx.heartInfo(h)
-        sfx.play(.tick)
-    }
-
-    /// The draft as a code to send, once it is a castle that can be played.
-    var draftCode: String? { draft.problem == nil ? CastleCode.encode(draft) : nil }
-
-    func pasteCastle(_ text: String) {
-        guard let d = CastleCode.decode(text) else { builderNote = Tx.codeInvalid; sfx.play(.thud); return }
-        loadDraft(d)
-        builderNote = Tx.codeLoaded
-    }
-
-    func saveCastle() {
-        if let pr = draft.problem { builderNote = Tx.problem(pr); return }
-        profile.design = draft.encoded
-        profile.castlesSaved += 1
-        let fresh = profile.unlockAchievements()
-        profile.save()
-        sfx.play(.charged)
-        closeBuilder()
-        show(toast: fresh.first.map(Tx.achievementDone) ?? Tx.saved)
-    }
-
-    func closeBuilder() {
-        screen = .menu
-        panel = .home
-        cam = .menu
-        menuA = Double(atan2(camPos.x, camPos.z))
-        resetBackdrop()
     }
 
     // MARK: Turn flow
@@ -928,7 +830,7 @@ final class GameController: NSObject, ObservableObject {
         present(info)
     }
 
-    private func show(toast msg: String) {
+    func show(toast msg: String) {
         toastWork?.cancel()
         toast = msg
         let w = DispatchWorkItem { [weak self] in self?.toast = nil }
