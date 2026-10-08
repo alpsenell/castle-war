@@ -97,7 +97,7 @@ extension World: BrickPhysics {
             return n
         }
         for (i, b) in design.bricks.enumerated() where b.material.isCrystal {
-            if gone(v, i) { if b.material == .decoy { v.lostCrystals.insert(i) } } else { addGem(v, brick: i) }
+            if gone(v, i) { v.lostCrystals.insert(i) } else { addGem(v, brick: i) }
         }
         for n in v.nodes.compactMap({ $0 }) { dress(n, in: v) }
         if let top = v.nodes.compactMap({ $0 }).filter({ $0.brick.shape.isTop || $0.brick.shape == .coneRoof }).max(by: { $0.brick.y < $1.brick.y })
@@ -112,7 +112,7 @@ extension World: BrickPhysics {
     /// Geometry for a brick as it is now: cracked iron and found-out decoys look different.
     private func dress(_ n: BrickNode, in v: CastleBricks) {
         let b = n.brick
-        let wear: BrickGeometry.Wear = b.material == .iron && n.hp < n.maxHp ? .cracked : b.material == .decoy && v.lostCrystals.contains(n.index) ? .revealed : .whole
+        let wear: BrickGeometry.Wear = b.material == .iron && n.hp < n.maxHp ? .cracked : b.material.isCrystal && v.lostCrystals.contains(n.index) ? .revealed : .whole
         n.geometry = BrickGeometry.geometry(b.shape, b.material, heart: v.design.heart, variant: BrickGeometry.variant(of: b), wear: wear)
     }
 
@@ -125,10 +125,11 @@ extension World: BrickPhysics {
     private func body(for n: BrickNode, dynamic: Bool) -> SCNPhysicsBody {
         let body = SCNPhysicsBody(type: dynamic ? .dynamic : .static, shape: BrickGeometry.physicsShape(n.brick.shape))
         if dynamic {
-            body.mass = CGFloat(n.brick.mass)
+            // Hearts and decoys sit heavy, so a glancing blow cracks them rather than flinging them away.
+            body.mass = CGFloat(n.brick.mass * (n.brick.material.isCrystal ? 4 : 1))
             body.contactTestBitMask = Phys.ground | Phys.brick | Phys.ball
         }
-        body.friction = n.brick.material == .ice ? 0.35 : 0.75
+        body.friction = n.brick.material == .ice ? 0.35 : n.brick.material.isCrystal ? 1 : 0.75
         body.rollingFriction = 0.05
         body.restitution = 0.05
         body.damping = 0.06
@@ -139,20 +140,30 @@ extension World: BrickPhysics {
     }
 
     /// Draws a resting castle as one merged copy, which is far cheaper than a node per brick.
+    /// The bricks stay in the scene for their bodies; only the camera and the sun stop seeing
+    /// them. (Hiding nodes with bodies, or changing bodies under hidden nodes, upsets SceneKit's physics.)
     func flatten(_ v: CastleBricks) {
         v.flat?.removeFromParentNode()
-        v.root.isHidden = false
+        drawBricks(v, true)
         let f = v.root.flattenedClone()
         f.physicsBody = nil
         scene.rootNode.addChildNode(f)
         v.flat = f
-        v.root.isHidden = true
+        drawBricks(v, false)
     }
 
     private func unflatten(_ v: CastleBricks) {
         v.flat?.removeFromParentNode()
         v.flat = nil
-        v.root.isHidden = false
+        drawBricks(v, true)
+    }
+
+    private func drawBricks(_ v: CastleBricks, _ on: Bool) {
+        v.root.enumerateHierarchy { n, _ in
+            guard n !== v.root else { return }
+            n.categoryBitMask = on ? 1 : World.unseen
+            n.castsShadow = on && !((n as? BrickNode)?.brick.shape.isDecal ?? false)
+        }
     }
 
     /// Where a brick is: a sleeping one's own position, a woken one's simulated position.
@@ -170,9 +181,9 @@ extension World: BrickPhysics {
         let light = SCNLight()
         light.type = .omni
         light.color = UIColor(hex: Look.heartColors(v.design.heart).glow)
-        light.intensity = 700
-        light.attenuationStartDistance = 1
-        light.attenuationEndDistance = 8
+        light.intensity = 320
+        light.attenuationStartDistance = 0.5
+        light.attenuationEndDistance = 5
         n.light = light
         n.runAction(.repeatForever(.rotateBy(x: 0, y: .pi * 2, z: 0, duration: 4)))
         n.runAction(.repeatForever(.sequence([.moveBy(x: 0, y: 0.4, z: 0, duration: 1.1), .moveBy(x: 0, y: -0.4, z: 0, duration: 1.1)])))
@@ -402,7 +413,7 @@ extension World: BrickPhysics {
                     burst(at: p, colors: [0x8d8794, 0xc9c3cf], count: 50, speed: 7, life: 1.4, size: 1.6, accel: 2, cone: false, grow: 1.8, alpha: 0.6)
                 }
             }
-            if b.material == .decoy, let n = v.nodes[i] { dress(n, in: v) }
+            if let n = v.nodes[i] { dress(n, in: v) }
             onCrystalLost?(v.side, i)
         }
     }

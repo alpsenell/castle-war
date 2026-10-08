@@ -927,7 +927,9 @@ enum Computer {
         if ammo == .homing || Double.random(in: 0...1) < difficulty.goldChance, let g = gold,
            let s = score(g), ammo == .homing || s.0 > (best?.0 ?? -1) { best = s }
         // Going straight for the heart, when it can see one. It cannot tell a decoy from the heart until one breaks.
-        if ammo != .homing, Double.random(in: 0...1) < difficulty.heartChance {
+        // Once the walls are mostly down there is little left to topple but the heart.
+        let heartChance = enemy.pct < 0.35 ? max(0.5, difficulty.heartChance) : difficulty.heartChance
+        if ammo != .homing, Double.random(in: 0...1) < heartChance {
             for h in enemy.heartLookalikes.shuffled() {
                 if let s = score(h), s.0 > enemy.total * 0.4 { best = s; break }
             }

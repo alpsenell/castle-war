@@ -818,6 +818,9 @@ final class GameController: NSObject, ObservableObject {
     /// A heart or decoy was knocked out while the shot played: a heart going is the finale.
     private func crystalLost(side: Int, brick i: Int) {
         guard phase == .impact, battle.castles.indices.contains(side), battle.castles[side].bricks[i].material == .heart else { return }
+        #if DEBUG
+        print("HEART lost side=\(side)")
+        #endif
         if !finale && side != settling?.side {
             finale = true
             cam = .impact
@@ -918,6 +921,12 @@ final class GameController: NSObject, ObservableObject {
             self.over = info
             if self.oppAgain { self.over?.detail = Tx.rematchWanted }
             self.screen = .over
+            #if DEBUG
+            // Unattended gauntlet runs go straight on to the next castle.
+            if self.autoPlay, self.mode == .gauntlet, info.gauntletNext {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in if self?.screen == .over { self?.rematch() } }
+            }
+            #endif
         }
     }
 

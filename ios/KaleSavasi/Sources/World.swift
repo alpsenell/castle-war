@@ -292,6 +292,8 @@ final class World {
     private var lakeNodes: [SCNNode] = []
     private var earth: [SCNNode] = []
     var clock: TimeInterval = 0
+    /// Render category of nodes the camera does not draw: bricks while their castle is shown flattened.
+    static let unseen = 2
     private var lockDepth = 0
     var onSplash: (() -> Void)?
     /// A brick broke (its material), a ball struck something (how hard), a heart or decoy was lost (castle, brick).
@@ -335,6 +337,7 @@ final class World {
         camera.vignettingIntensity = 0.3
         camera.saturation = 1.08
         camera.contrast = 0.06
+        camera.categoryBitMask = ~World.unseen
         cameraNode.camera = camera
         cameraNode.simdPosition = SIMD3(90, 40, 90)
         scene.rootNode.addChildNode(cameraNode)

@@ -89,7 +89,7 @@ enum BrickGeometry {
                 mat = textured(Textures.tint(t.albedo, wear == .cracked ? "iron-cracked" : "iron", wear == .cracked ? 0x4c5157 : 0x707880), normal: t.normal,
                                roughness: wear == .cracked ? 0.8 : 0.42, metal: wear == .cracked ? 0.35 : 0.75, bump: 1.2)
             case .heart:
-                mat = Look.heartMaterial(heart)
+                mat = wear == .revealed ? Look.solid(0x4a3a44, roughness: 0.6) : Look.heartMaterial(heart)
             case .decoy:
                 mat = wear == .revealed ? Look.solid(0x77707c, roughness: 0.55) : Look.heartMaterial(heart)
             }
