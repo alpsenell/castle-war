@@ -14,16 +14,20 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.alpsenel.kalesavasi
+        DEVELOPMENT_TEAM: 6S7Q8F967Q
+        CODE_SIGN_STYLE: Automatic
         PRODUCT_NAME: KaleSavasi
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1,2"
         MARKETING_VERSION: "1.0"
-        CURRENT_PROJECT_VERSION: "1"
+        CURRENT_PROJECT_VERSION: "2"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
       path: Info.plist
       properties:
-        CFBundleDisplayName: Kale Savaşı
+        CFBundleDisplayName: Keepfall
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleLocalizations:
           - tr
           - en
