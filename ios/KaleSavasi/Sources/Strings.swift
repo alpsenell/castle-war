@@ -573,4 +573,14 @@ enum Tx {
         case .bridge: return p("Köprü", "Bridge")
         }
     }
+
+    // MARK: 2.0 UI
+    static var play: String { p("OYNA", "PLAY") }
+    static var victory: String { p("ZAFER!", "VICTORY!") }
+    static var defeat: String { p("YENİLGİ", "DEFEAT") }
+    static var gameCenterPitch: String { p("Dünyadan rakipler", "Rivals worldwide") }
+    static var nearbyPitch: String { p("Yanındaki biriyle", "Someone close by") }
+    static var partyShort: String { p("Herkes kendi için", "Free-for-all") }
+    static var localPitch: String { p("Tek cihaz, iki kişi", "One device, two players") }
+    static var players: String { p("Oyuncular", "Players") }
 }

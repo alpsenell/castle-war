@@ -16,6 +16,7 @@
 		687D6577945EAB72D84D4F38 /* Menus.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB8224A17A6FB3CBB5E79D2D /* Menus.swift */; };
 		691CC73C55EF7408772C48F2 /* Strings.swift in Sources */ = {isa = PBXBuildFile; fileRef = D74DDD83CE8BEF18F51187EC /* Strings.swift */; };
 		70B36760A2FC34934D370595 /* BuilderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3747712D5D44C078505D790 /* BuilderView.swift */; };
+		7A1A24CE228924465502D41E /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E7EF73AAC1A6B852C9DA722 /* Theme.swift */; };
 		7CA8724B0C2CD70D84316BB7 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = 38B5CCF673CF05A36471F7A4 /* InfoPlist.strings */; };
 		96D9BA2182943F859CBDE186 /* BrickGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFCA23F68AE5AD47666CB567 /* BrickGeometry.swift */; };
 		9C304F6BD7623CF8AC36009C /* GameController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7A1AE2CF41C6AE22B158A24 /* GameController.swift */; };
@@ -35,6 +36,7 @@
 		823D0CAB0929129EF535EA92 /* Textures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Textures.swift; sourceTree = "<group>"; };
 		86AEB13D6197BE1DDFBDD1ED /* Rules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Rules.swift; sourceTree = "<group>"; };
 		8DCB1F1E5FF3A8CB55F594C5 /* Net.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Net.swift; sourceTree = "<group>"; };
+		8E7EF73AAC1A6B852C9DA722 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		914D6F007EA7A24B1C52E564 /* World.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = World.swift; sourceTree = "<group>"; };
 		930588B241A4AEA001E25EF6 /* Sfx.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sfx.swift; sourceTree = "<group>"; };
 		A7A1AE2CF41C6AE22B158A24 /* GameController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameController.swift; sourceTree = "<group>"; };
@@ -68,6 +70,7 @@
 				B29EE416F929A78A3E2E1F85 /* Stamps.swift */,
 				D74DDD83CE8BEF18F51187EC /* Strings.swift */,
 				823D0CAB0929129EF535EA92 /* Textures.swift */,
+				8E7EF73AAC1A6B852C9DA722 /* Theme.swift */,
 				5469E465B403D15E28ADE431 /* Views.swift */,
 				914D6F007EA7A24B1C52E564 /* World.swift */,
 				181CA527699AF2B160B039BB /* World+Builder.swift */,
@@ -178,6 +181,7 @@
 				18CE1FA88BD358714F38E6C7 /* Stamps.swift in Sources */,
 				691CC73C55EF7408772C48F2 /* Strings.swift in Sources */,
 				560C95447A93674971F0F60C /* Textures.swift in Sources */,
+				7A1A24CE228924465502D41E /* Theme.swift in Sources */,
 				58C6A4F8294C72D4837E4E97 /* Views.swift in Sources */,
 				E121CA59FBFEE3E36A593DB1 /* World+Builder.swift in Sources */,
 				51BE5FE3798D9EFA42295B05 /* World.swift in Sources */,
