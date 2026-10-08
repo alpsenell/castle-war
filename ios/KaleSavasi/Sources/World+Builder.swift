@@ -15,7 +15,8 @@ enum BenchHit {
 extension World {
     /// Hides the left castle and puts a builder canvas on its plot.
     func openBench() -> BuildBench {
-        castleViews.first?.root.isHidden = true
+        // Only the merged copy is hidden: nodes with bodies must never be.
+        castleViews.first?.flat?.isHidden = true
         let bench = BuildBench(arena: arena)
         scene.rootNode.addChildNode(bench.root)
         scene.rootNode.addChildNode(bench.ghostRoot)
@@ -78,7 +79,7 @@ final class BuildBench {
     func remove() {
         root.removeFromParentNode()
         ghostRoot.removeFromParentNode()
-        world?.castleViews.first?.root.isHidden = false
+        world?.castleViews.first?.flat?.isHidden = false
     }
 
     // MARK: Showing the design
@@ -212,26 +213,14 @@ final class BuildBench {
         floor.physicsBody?.categoryBitMask = BuildBench.testCategory
         floor.physicsBody?.friction = 0.9
         floor.simdPosition = SIMD3(depth / 2, -1, width / 2)
+        world.lockScene()
         root.addChildNode(floor)
         for (i, n) in nodes.enumerated() where !n.isHidden {
             let b = shown.bricks[i]
-            guard !b.shape.isDecal else { continue }
-            let s = Float(BK.step)
-            // Built at rotation 0; the node's own rotation turns it.
-            let size = b.shape.size
-            let box = SCNBox(width: CGFloat(Float(size.x) * s * 0.97), height: CGFloat(Float(size.y) * s * 0.99), length: CGFloat(Float(size.z) * s * 0.97), chamferRadius: 0)
-            var shape = SCNPhysicsShape(geometry: box, options: nil)
-            if b.shape == .pyramidRoof {
-                // Pyramids are drawn through a pivot (see BrickGeometry). Drop it for the test so the
-                // node's origin is the base, and lift the box to the middle.
-                let h = Float(size.y) * s / 2
-                n.pivot = SCNMatrix4Identity
-                n.simdPosition.y -= h
-                shape = SCNPhysicsShape(shapes: [shape], transforms: [NSValue(scnMatrix4: SCNMatrix4MakeTranslation(0, h, 0))])
-            }
+            guard let shape = BrickGeometry.physicsShape(b.shape) else { continue }
             let body = SCNPhysicsBody(type: .dynamic, shape: shape)
             body.mass = CGFloat(b.mass)
-            body.friction = 0.85
+            body.friction = b.material == .ice ? 0.35 : 0.75
             body.rollingFriction = 0.05
             body.restitution = 0.05
             body.categoryBitMask = BuildBench.testCategory
@@ -239,24 +228,22 @@ final class BuildBench {
             body.contactTestBitMask = 0
             n.physicsBody = body
         }
+        world.unlockScene()
         world.scene.physicsWorld.speed = 1
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
             guard let self else { return }
             var moved = 0
+            self.world?.lockScene()
             for (i, n) in self.nodes.enumerated() where n.physicsBody != nil {
-                var now = n.presentation.simdTransform
+                let now = n.presentation.simdTransform
                 n.physicsBody = nil
-                if self.shown.bricks[i].shape == .pyramidRoof {
-                    let h = Float(BrickShape.pyramidRoof.size.y) * Float(BK.step) / 2
-                    n.pivot = SCNMatrix4MakeTranslation(0, h, 0)
-                    now.columns.3 += now.columns.1 * h
-                }
                 n.simdTransform = now
                 let home = self.homes[i]
                 let d = simd_distance(SIMD3(now.columns.3.x, now.columns.3.y, now.columns.3.z), SIMD3(home.columns.3.x, home.columns.3.y, home.columns.3.z))
                 if d > 0.45 { moved += 1 }
             }
             floor.removeFromParentNode()
+            self.world?.unlockScene()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                 SCNTransaction.begin()
                 SCNTransaction.animationDuration = 0.8

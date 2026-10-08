@@ -147,6 +147,143 @@ enum Textures {
         }
     }()
 
+    // MARK: Bricks
+
+    /// Distance to the nearest and second-nearest of a jittered grid of points that wraps at the
+    /// edges: the cells of cracked ice and the chips in worn stone.
+    private struct Cells {
+        let n: Int
+        let pts: [(Float, Float)]
+        init(cells: Int, seed: UInt32) {
+            n = cells
+            var r = Mulberry32(seed)
+            pts = (0..<cells * cells).map { _ in (Float(r.next()), Float(r.next())) }
+        }
+        func value(_ u: Float, _ v: Float) -> (f1: Float, f2: Float) {
+            let x = u * Float(n), y = v * Float(n), cx = Int(x.rounded(.down)), cy = Int(y.rounded(.down))
+            var f1: Float = 9, f2: Float = 9
+            for dy in -1...1 { for dx in -1...1 {
+                let gx = cx + dx, gy = cy + dy
+                let p = pts[((gy % n + n) % n) * n + ((gx % n + n) % n)]
+                let px = Float(gx) + p.0 - x, py = Float(gy) + p.1 - y
+                let d = (px * px + py * py).squareRoot()
+                if d < f1 { f2 = f1; f1 = d } else if d < f2 { f2 = d }
+            } }
+            return (f1, f2)
+        }
+    }
+
+    /// A timber's face: long grain along u, a few knots, near-white so a stain can be multiplied in.
+    static let timber: (albedo: UIImage, normal: UIImage) = {
+        let n = 256, grain = Fractal(base: 4, octaves: 4, seed: 101), fine = Fractal(base: 64, octaves: 2, seed: 103), knots = Cells(cells: 3, seed: 107)
+        func u(_ i: Int) -> Float { Float(i) / Float(n) }
+        func height(_ x: Int, _ y: Int) -> Float {
+            let g = grain.value(u(x) * 0.25, u(y))
+            let k = knots.value(u(x), u(y)).f1
+            let warp = max(0, 0.22 - k) * 30
+            let ring = sin((u(y) * 34 + g * 6 + warp) * .pi)
+            return ring * 0.5 + 0.5 - max(0, 0.06 - k) * 6
+        }
+        let albedo = image(n, n) { x, y in
+            let h = height(x, y), f = fine.value(u(x) * 0.2, u(y))
+            let v = 0.7 + h * 0.18 + (f - 0.5) * 0.16
+            return (v, v * 0.9, v * 0.8)
+        }
+        let normal = normalMap(n, strength: 2.2) { x, y in height(x, y) * 0.6 + fine.value(u(x) * 0.2, u(y)) * 0.4 }
+        return (albedo, normal)
+    }()
+
+    /// A dressed stone block: broad mottling, chisel marks and chipped hollows.
+    static let ashlar: (albedo: UIImage, normal: UIImage) = {
+        let n = 256, broad = Fractal(base: 3, octaves: 4, seed: 113), grit = Fractal(base: 48, octaves: 3, seed: 127), chips = Cells(cells: 7, seed: 131)
+        func u(_ i: Int) -> Float { Float(i) / Float(n) }
+        func height(_ x: Int, _ y: Int) -> Float {
+            let c = chips.value(u(x), u(y))
+            let hollow = max(0, 0.12 - (c.f2 - c.f1)) * 2.5
+            return broad.value(u(x), u(y)) * 0.45 + grit.value(u(x), u(y)) * 0.4 - hollow
+        }
+        let albedo = image(n, n) { x, y in
+            let b = broad.value(u(x), u(y)), g = grit.value(u(x), u(y)), h = height(x, y)
+            var v = 0.8 + (b - 0.5) * 0.28 + (g - 0.5) * 0.2
+            v -= max(0, 0.35 - h) * 0.25
+            return (v, v * 0.98, v * 0.95)
+        }
+        let normal = normalMap(n, strength: 4.5) { x, y in height(x, y) }
+        return (albedo, normal)
+    }()
+
+    /// Clear ice with a web of frozen cracks and a few trapped bubbles.
+    static let ice: (albedo: UIImage, normal: UIImage) = {
+        let n = 256, web = Cells(cells: 5, seed: 137), cloud = Fractal(base: 4, octaves: 3, seed: 139), bubbles = Cells(cells: 14, seed: 149)
+        func u(_ i: Int) -> Float { Float(i) / Float(n) }
+        func crack(_ x: Int, _ y: Int) -> Float { let c = web.value(u(x), u(y)); return max(0, 1 - (c.f2 - c.f1) * 22) }
+        let albedo = image(n, n) { x, y in
+            let k = crack(x, y), c = cloud.value(u(x), u(y)), b = bubbles.value(u(x), u(y)).f1
+            let v = 0.78 + (c - 0.5) * 0.2 + k * 0.22 + (b < 0.06 ? 0.15 : 0)
+            return (v * 0.86, v * 0.95, v)
+        }
+        let normal = normalMap(n, strength: 3) { x, y in cloud.value(u(x), u(y)) * 0.4 - crack(x, y) * 0.5 }
+        return (albedo, normal)
+    }()
+
+    /// Dark iron plate in bands, studded with rivets; `cracked` splits it with jagged fractures.
+    static func ironPlate(cracked: Bool) -> (albedo: UIImage, normal: UIImage) {
+        let n = 128, rust = Fractal(base: 4, octaves: 4, seed: 151), split = Cells(cells: 3, seed: 157)
+        func u(_ i: Int) -> Float { Float(i) / Float(n) }
+        func height(_ x: Int, _ y: Int) -> Float {
+            let fy = u(y) * 2, band = fy - fy.rounded(.down)
+            var h: Float = band < 0.06 || band > 0.94 ? 0 : 0.6
+            let rx = u(x) * 4, ry = u(y) * 2 * 1 + 0.5
+            let dx = rx - rx.rounded(.down) - 0.5, dy = ry - ry.rounded(.down) - 0.5
+            if band > 0.06 && band < 0.94, dx * dx + dy * dy * 4 < 0.02 { h = 1 }
+            if cracked { let c = split.value(u(x), u(y)); if c.f2 - c.f1 < 0.035 { h -= 0.8 } }
+            return h
+        }
+        let albedo = image(n, n) { x, y in
+            let r = rust.value(u(x), u(y)), h = height(x, y)
+            let v = 0.55 + h * 0.2 + (r - 0.5) * 0.25
+            let rusty = max(0, r - 0.6) * 1.2
+            return (v + rusty * 0.25, v * (1 - rusty * 0.2), v * (1 - rusty * 0.45))
+        }
+        let normal = normalMap(n, strength: 3) { x, y in height(x, y) }
+        return (albedo, normal)
+    }
+
+    /// Overlapping wooden shingles for roofs.
+    static let shingles: (albedo: UIImage, normal: UIImage) = {
+        let n = 128, rows = 6, wear = Fractal(base: 8, octaves: 3, seed: 163)
+        func cell(_ x: Int, _ y: Int) -> (edge: Float, shade: Float) {
+            let row = y * rows / n, fy = Float(y * rows % n) / Float(n)
+            let shifted = x + (row % 2 == 0 ? 0 : n / 8), fx = Float(shifted * 4 % n) / Float(n)
+            let edge: Float = fx < 0.06 || fy > 0.92 ? 0 : 1
+            return (edge, 0.8 + fy * 0.2)
+        }
+        let albedo = image(n, n) { x, y in
+            let c = cell(x, y), w = wear.value(Float(x) / Float(n), Float(y) / Float(n))
+            let v = (0.5 + c.edge * 0.45) * c.shade * (0.82 + w * 0.36)
+            return (v, v, v)
+        }
+        let normal = normalMap(n, strength: 5) { x, y in let c = cell(x, y); return c.edge * c.shade }
+        return (albedo, normal)
+    }()
+
+    private static var tinted: [String: UIImage] = [:]
+
+    /// A near-white texture with a colour multiplied in, cached per colour.
+    static func tint(_ base: UIImage, _ key: String, _ hex: UInt32) -> UIImage {
+        let k = "\(key)-\(hex)"
+        if let hit = tinted[k] { return hit }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let img = UIGraphicsImageRenderer(size: base.size, format: format).image { ctx in
+            base.draw(at: .zero)
+            UIColor(hex: hex).setFill()
+            ctx.fill(CGRect(origin: .zero, size: base.size), blendMode: .multiply)
+        }
+        tinted[k] = img
+        return img
+    }
+
     /// Where the sun sits: azimuth as a fraction of the panorama's width, elevation in radians.
     /// It is off to one side and a little behind the left-hand player, so both castles show lit and shaded faces.
     static let sunU: Float = 0.42, sunElevation: Float = 0.9

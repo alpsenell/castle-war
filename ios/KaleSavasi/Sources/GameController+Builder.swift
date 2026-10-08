@@ -381,10 +381,10 @@ extension GameController {
     // MARK: Codes
 
     /// The draft as a code to send, once it is a castle that can be played.
-    var draftCode: String? { draft.problem == nil ? BuilderCode.encode(draft) : nil }
+    var draftCode: String? { draft.problem == nil ? CastleCode.encode(draft) : nil }
 
     func pasteCastle(_ text: String) {
-        guard let d = BuilderCode.decode(text) else { flash(Tx.codeInvalid); sfx.play(.thud); return }
+        guard let d = CastleCode.decode(text) else { flash(Tx.codeInvalid); sfx.play(.thud); return }
         loadDraft(d)
         flash(Tx.codeLoaded)
     }
@@ -432,64 +432,9 @@ extension GameController {
     #endif
 }
 
-// MARK: - Adapters to code other workstreams are rewriting
-
-/// Castle codes for brick castles. Temporary: until `CastleCode` writes v2 codes this packs a
-/// design under its own prefix (24 bits a brick, base32, with a checksum). Pasted v1 codes are
-/// rebuilt from stamps. Switch `encode`/`decode` to `CastleCode` once it handles bricks.
-enum BuilderCode {
-    static let prefix = "KSB-"
-    private static let alphabet = Array("0123456789ABCDEFGHJKMNPQRSTVWXYZ")
-
-    static func encode(_ d: BrickDesign) -> String {
-        var bits: [Bool] = []
-        func put(_ v: Int, _ n: Int) { for i in stride(from: n - 1, through: 0, by: -1) { bits.append((v >> i) & 1 == 1) } }
-        put(BrickDesign.format, 4)
-        put(d.heart.rawValue, 4)
-        put(d.bricks.count, 9)
-        for b in d.bricks { put(b.shape.rawValue, 4); put(b.material.rawValue, 3); put(b.x, 5); put(b.y, 5); put(b.z, 5); put(b.rot, 2) }
-        put(checksum(d.encoded), 8)
-        while bits.count % 5 != 0 { bits.append(false) }
-        var out = prefix
-        for i in stride(from: 0, to: bits.count, by: 5) {
-            out.append(alphabet[bits[i..<i + 5].reduce(0) { $0 * 2 + ($1 ? 1 : 0) }])
-        }
-        return out
-    }
-
-    /// Finds a castle code anywhere in a piece of text: a brick code, or a v1 tile code.
-    static func decode(_ text: String) -> BrickDesign? {
-        let up = text.uppercased()
-        guard let start = up.range(of: prefix) else { return CastleCode.decode(text).map(BrickDesign.init(legacy:)) }
-        var bits: [Bool] = []
-        for ch in up[start.upperBound...] {
-            let c: Character = ch == "O" ? "0" : ch == "I" || ch == "L" ? "1" : ch
-            guard let v = alphabet.firstIndex(of: c) else { break }
-            for i in stride(from: 4, through: 0, by: -1) { bits.append((v >> i) & 1 == 1) }
-        }
-        var at = 0
-        func take(_ n: Int) -> Int? {
-            guard at + n <= bits.count else { return nil }
-            defer { at += n }
-            return bits[at..<at + n].reduce(0) { $0 * 2 + ($1 ? 1 : 0) }
-        }
-        guard take(4) == BrickDesign.format, let h = take(4), let n = take(9) else { return nil }
-        var flat = [BrickDesign.format, h]
-        for _ in 0..<n {
-            guard let s = take(4), let m = take(3), let x = take(5), let y = take(5), let z = take(5), let r = take(2) else { return nil }
-            flat += [s, m, x, y, z, r]
-        }
-        guard take(8) == checksum(flat) else { return nil }
-        return BrickDesign(encoded: flat)
-    }
-
-    private static func checksum(_ v: [Int]) -> Int { v.reduce(17) { ($0 * 31 + $1) & 0xff } }
-}
-
-/// Ready-made castles offered in the builder tray. Adapter: presets are tile castles until the
-/// physics workstream rebuilds them in bricks; switch this to the brick presets then.
+/// Ready-made castles offered in the builder tray.
 enum BuilderCatalog {
-    static let castles: [BrickDesign] = Presets.all.map(BrickDesign.init(legacy:))
+    static var castles: [BrickDesign] { Presets.all }
 }
 
 #if DEBUG

@@ -1,14 +1,14 @@
 import Foundation
 
-// Game rules with no rendering: castle designs, ballistics, damage, power-ups and the computer
-// player. Everything that decides an outcome lives here so both players of an online match
-// compute identical results from the same numbers.
+// Game rules with no rendering: ballistics up to the first touch, what a settled castle is worth,
+// power-ups and the computer player. The flight is deterministic so every device draws the same
+// arc; what happens after the ball touches a brick is played by the physics world, and the rules
+// read the castles back from its `SettleReport`.
 
 enum K {
-    static let gw = 22, gd = 30, gh = 20          // castle grid: depth, width, layers
-    static let lh = 1.2                            // layer height
+    static let gw = BK.depth * Int(BK.unit), gd = BK.width * Int(BK.unit)   // castle footprint in world units: depth, width
     static let grav = 12.0, dt = 1.0 / 120.0
-    static let ballR = 0.7, blastR = 5.1
+    static let ballR = 0.7
     static let vMin = 20.0, vMax = 42.0, pitch = 32.0
     static let wind = 1.4
     static let front = 40.0                        // |x| of each castle's front face
@@ -18,18 +18,23 @@ enum K {
     static let platX = 31.0, platHalf = 3.0, platTop = 2.4
     static let pivotY = platTop + 1.25, muzzle = 2.6
     static let maxYaw = 35.0
-    static let critRange = 3.2, critBoost = 1.25     // gold target: how close counts, and the blast bonus
-    static let megaBoost = 1.45                      // blast bonus of a charged mega shot
+    static let critRange = 3.2, critBoost = 1.25     // gold target: how close counts, and the ball's extra mass
+    static let megaBoost = 2.2                       // ball mass of a charged mega shot
     static let turnSeconds = 20.0                    // shot clock for timed modes
     static let homing = 7.0                          // steering pull of a homing shot
-    static let pierceDepth = 6.5                     // how far a piercer travels inside before it goes off
-    static let clusterSpread = 4.6, clusterScale = 0.72
+    static let pierce = 2                            // bricks a piercer goes straight through
     static let pickupRange = 2.8                     // how close a shot must pass to grab a balloon
-    static let shieldFactor = 0.6                    // blast radius against a shielded castle
-    static let repairCells = 110
-    static let heartReach = 0.5                      // the heart only breaks this much closer to a blast than stone does
+    static let shieldFactor = 0.6                    // impulses against a shielded castle
+    static let homeReach = 0.6                       // a brick further than this from home no longer counts as standing
+    static let heartReach = 1.5                      // a heart or decoy knocked further than this is lost
+    static let upright = 0.9                         // cosine of the tilt a standing brick may have
+    static let repairShare = 0.12                    // share of a castle's mass a repair balloon puts back
+    static let settleSeconds = 6.0                   // longest a shot's physics may run
+    static let breakScale = 0.75                     // overall scale on `BrickMaterial.breakImpulse`
+    static let ballMass: Float = 20                  // a cannonball's mass in the physics world
+    static let maxChips = 90                         // fragments alive at once
+    static let brickGravity = 20.0                  // the physics world's gravity, stronger than the flight's so bricks fall snappily
     static let rulesVersion = 5                      // bumped whenever an online match would play out differently
-    static let cells = gw * gh * gd
 }
 
 struct Mulberry32 {
@@ -56,37 +61,20 @@ struct Aim: Equatable {
     var target = -1
 }
 
-struct Block {
-    let id: Int
-    let x: Int, y: Int, z: Int
-    let len: Int
-    let dir: Int        // 1 runs along x, 2 along z
-    let mat: UInt8      // 1 stone, 2 team colour, 3 trim, 4 heart, 5 reinforced stone, 6 decoy crystal
-    var alive = true
-    var hp: UInt8 = 1   // reinforced stone takes two blasts
-    var ghost = false   // never stood: cut from the plan because nothing held it up
-}
-
-struct DecorSpec {
-    let x: Double, y: Double, z: Double    // grid coordinates of the base centre
-    let w: Double, d: Double, ht: Double
-    let flag: Bool
-    let cells: [[Int]]
-}
-
+/// What one shot did to one castle, read from the settled bricks.
 struct Damage {
-    var blast: [Int] = []
-    var fall: [Int] = []
-    var cells = 0
-    var heart = 0
-    /// Reinforced blocks that took their first blast and still stand.
+    /// Share of the castle's mass that stood before the shot and no longer does.
+    var lost = 0.0
+    /// Bricks the shot broke, and bricks it knocked out of place without breaking.
+    var broken: [Int] = []
+    var moved = 0
+    /// Share of the heart's health lost.
+    var heart = 0.0
+    /// Iron bricks that cracked and still stand.
     var crack: [Int] = []
-    /// Decoy hearts this damage gave away.
+    /// Decoy hearts this shot gave away, as indices into `Castle.decoys`.
     var decoys: [Int] = []
-    mutating func add(_ d: Damage) {
-        blast += d.blast; fall += d.fall; cells += d.cells; heart += d.heart; crack += d.crack
-        decoys += d.decoys.filter { !decoys.contains($0) }
-    }
+    var hit: Bool { lost > 0.002 || !broken.isEmpty || moved > 0 || !crack.isEmpty || heart > 0 }
 }
 
 enum HitKind { case out, water, ground, castle }
@@ -116,6 +104,7 @@ enum Modifier: Int, CaseIterable, Identifiable {
 struct MatchRules: Equatable {
     var gravity = K.grav
     var windScale = 1.0
+    /// Ball weight: "big blast" matches fire heavier balls.
     var blastScale = 1.0
     var megaRate = 1.0
     var pickups = true
@@ -130,14 +119,9 @@ struct MatchRules: Equatable {
         case .calm: windScale = 0
         case .lowGravity: gravity = 9
         case .megaRush: megaRate = 2
-        case .bigBlast: blastScale = 1.2
+        case .bigBlast: blastScale = 1.3
         }
     }
-}
-
-struct Blast: Equatable {
-    var center: Vec3
-    var radius: Double
 }
 
 struct ShotResult {
@@ -146,7 +130,10 @@ struct ShotResult {
     var vel: Vec3
     var kind: HitKind
     var side: Int
-    var blasts: [Blast] = []
+    /// The brick of castle `side` the ball touched first.
+    var brick: Int?
+    /// That brick is a heart or a decoy: the shot may be the last one.
+    var crystal = false
     var shooter = 0
     var ammo = Ammo.standard
     var mega = false
@@ -158,14 +145,13 @@ struct ShotResult {
 /// Everything one shot changed.
 struct ShotOutcome {
     var damage: [Damage]
+    /// Bricks of the shooter's castle the repair balloon put back.
     var repaired: [Int] = []
     var pickup: PickupKind?
     var shieldBroken: Int?
     /// Side whose aegis heart just threw up a shield.
     var aegis: Int?
 }
-
-@inline(__always) func cellIndex(_ x: Int, _ y: Int, _ z: Int) -> Int { (y * K.gw + x) * K.gd + z }
 
 // MARK: - Arena
 
@@ -211,712 +197,347 @@ struct Arena: Equatable {
     }
 }
 
-// MARK: - Castle designs
+/// A castle's place on the field. Castle-local coordinates are those of `PlacedBrick.center`:
+/// x from the back toward the enemy, y up, z from the owner's left, in world units.
+struct CastleFrame {
+    let corner: Vec3
+    let fx, fz, rx, rz: Double
 
-/// Building pieces. A tile is 2×2 grid cells; `span` is the piece's footprint in tiles.
-enum PieceKind: Int, CaseIterable, Identifiable {
-    case wallLow = 1, wallHigh, tower, tallTower, bastion, keep, heart, wallStrong, shelter, moat, decoy
-    var id: Int { rawValue }
-    var span: Int {
+    init(seat: Int, arena: Arena) {
+        let f = arena.forward(seat), r = arena.right(seat), half = Double(K.gd) / 2
+        fx = f.x; fz = f.z; rx = r.x; rz = r.z
+        corner = Vec3(x: -K.xEdge * f.x - half * r.x, y: 0, z: -K.xEdge * f.z - half * r.z)
+    }
+
+    func world(_ l: SIMD3<Double>) -> Vec3 {
+        Vec3(x: corner.x + l.x * fx + l.z * rx, y: l.y, z: corner.z + l.x * fz + l.z * rz)
+    }
+    func local(_ x: Double, _ y: Double, _ z: Double) -> SIMD3<Double> {
+        let dx = x - corner.x, dz = z - corner.z
+        return SIMD3(dx * fx + dz * fz, y, dx * rx + dz * rz)
+    }
+    /// A world direction in the castle's frame.
+    func localDir(_ v: Vec3) -> SIMD3<Double> { SIMD3(v.x * fx + v.z * fz, v.y, v.x * rx + v.z * rz) }
+    /// Turn about y that takes castle-local axes to world axes.
+    var yaw: Double { atan2(-fz, fx) }
+}
+
+// MARK: - Brick bodies
+
+/// Rotates `v` by the unit quaternion `q` (x, y, z, w); `inverse` turns the other way.
+@inline(__always) func rotate(_ v: SIMD3<Double>, by q: SIMD4<Float>, inverse: Bool = false) -> SIMD3<Double> {
+    let s: Double = inverse ? -1 : 1
+    let u = SIMD3(Double(q.x) * s, Double(q.y) * s, Double(q.z) * s), w = Double(q.w)
+    func cross(_ a: SIMD3<Double>, _ b: SIMD3<Double>) -> SIMD3<Double> { SIMD3(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x) }
+    let t = cross(u, v) * 2
+    return v + t * w + cross(u, t)
+}
+
+extension BrickShape {
+    /// The solid boxes of a brick at rotation 0, as centre and half size in world units about
+    /// the brick's centre. Shots and bodies collide with these.
+    var boxes: [(c: SIMD3<Double>, h: SIMD3<Double>)] {
+        let s = size, k = BK.step
+        let h = SIMD3(Double(s.x), Double(s.y), Double(s.z)) * (k / 2)
         switch self {
-        case .wallLow, .wallHigh, .heart, .wallStrong, .moat, .decoy: return 1
-        case .tower, .tallTower, .bastion: return 2
-        case .keep, .shelter: return 3
+        case .arch:
+            let leg = h.z / 3
+            return [(SIMD3(0, -h.y / 4, -h.z + leg / 2), SIMD3(h.x, h.y * 0.75, leg / 2)),
+                    (SIMD3(0, -h.y / 4, h.z - leg / 2), SIMD3(h.x, h.y * 0.75, leg / 2)),
+                    (SIMD3(0, h.y * 0.75, 0), SIMD3(h.x, h.y / 4, h.z))]
+        case .coneRoof: return [(SIMD3(0, -h.y * 0.3, 0), SIMD3(h.x * 0.62, h.y * 0.7, h.z * 0.62))]
+        case .pyramidRoof: return [(SIMD3(0, -h.y * 0.3, 0), SIMD3(h.x * 0.7, h.y * 0.7, h.z * 0.7))]
+        case .wedge: return [(SIMD3(-h.x * 0.25, -h.y * 0.25, 0), SIMD3(h.x * 0.75, h.y * 0.75, h.z))]
+        case .moat: return []
+        default: return [(SIMD3(0, 0, 0), h)]
         }
     }
-    /// Pieces that may sit in the open middle tile of a shelter.
-    var fitsUnderShelter: Bool { self == .heart || self == .decoy }
+    /// Radius of a sphere about the centre that holds the whole brick.
+    var reach: Double { let s = size; return (Double(s.x * s.x + s.y * s.y + s.z * s.z)).squareRoot() * BK.step / 2 }
 }
+
+extension BrickPose {
+    var pos: SIMD3<Double> { SIMD3(Double(p.x), Double(p.y), Double(p.z)) }
+}
+
+// MARK: - Castle state
 
 /// What the heart can do besides being protected. Chosen in the builder, unlocked by level.
 enum HeartKind: Int, CaseIterable, Identifiable {
     case crystal = 0, living, aegis, titan
     var id: Int { rawValue }
-    /// Stone it costs on top of the free crystal heart.
+    /// Coins it costs on top of the free crystal heart.
     var cost: Int { [0, 80, 80, 100][rawValue] }
     var level: Int { [1, 4, 7, 10][rawValue] }
-    /// Courses of crystal it stands.
-    var courses: Int { self == .titan ? 4 : 3 }
+    /// Hits the heart crystal (and every decoy, so they still pass for it) takes before it breaks.
+    var hp: Int { self == .titan ? 3 : 2 }
 }
 
-struct Piece: Equatable {
-    var kind: PieceKind
-    var tx: Int      // tile row, 0 = back of the castle
-    var tz: Int      // tile column, 0 = the owner's left
-}
+extension BrickDesign {
+    /// Hit points a brick of this castle starts with: hearts and decoys take the heart type's.
+    func hp(_ b: PlacedBrick) -> Int { b.material.isCrystal ? heart.hp : b.material.hp }
 
-/// A castle as its owner laid it out: pieces on an 11×15 tile grid, paid for in stone.
-/// Every castle guards one heart; the heart is free, the keep is optional.
-struct CastleDesign: Equatable {
-    var pieces: [Piece] = []
-    var heart = HeartKind.crystal
-
-    static let rows = K.gw / 2, cols = K.gd / 2
-    static let budget = 2400, minimum = 1200
-    static let maxDecoys = 2
-
-    private static let costs: [PieceKind: Int] = {
-        var out: [PieceKind: Int] = [:]
-        for k in PieceKind.allCases {
-            var p = Plan()
-            p.add(Piece(kind: k, tx: 4, tz: 4))
-            out[k] = p.vox.reduce(0) { $0 + ($1 == 0 ? 0 : $1 == 5 ? 2 : 1) }
-        }
-        out[.heart] = 0
-        out[.moat] = 30
-        out[.decoy] = 80
-        return out
-    }()
-
-    static func cost(of kind: PieceKind) -> Int { costs[kind] ?? 0 }
-    var cost: Int { pieces.reduce(heart.cost) { $0 + CastleDesign.cost(of: $1.kind) } }
-    var keeps: Int { pieces.filter { $0.kind == .keep }.count }
-    var hearts: Int { pieces.filter { $0.kind == .heart }.count }
-    var decoys: Int { pieces.filter { $0.kind == .decoy }.count }
-
-    /// Does a piece take up a tile? A shelter leaves its middle tile open for a heart.
-    static func covers(_ p: Piece, row tx: Int, col tz: Int) -> Bool {
-        let n = p.kind.span
-        guard tx >= p.tx && tx < p.tx + n && tz >= p.tz && tz < p.tz + n else { return false }
-        return p.kind != .shelter || tx != p.tx + 1 || tz != p.tz + 1
-    }
-
-    /// Index of the piece covering a tile, if any.
-    func piece(atRow tx: Int, col tz: Int) -> Int? {
-        pieces.firstIndex { CastleDesign.covers($0, row: tx, col: tz) }
-    }
-
-    func fits(_ kind: PieceKind, row tx: Int, col tz: Int) -> Bool {
-        let n = kind.span
-        guard tx >= 0, tz >= 0, tx + n <= CastleDesign.rows, tz + n <= CastleDesign.cols else { return false }
-        let new = Piece(kind: kind, tx: tx, tz: tz)
-        for p in pieces {
-            for r in tx..<tx + n { for c in tz..<tz + n where CastleDesign.covers(new, row: r, col: c) && CastleDesign.covers(p, row: r, col: c) { return false } }
-            // Only a heart or a decoy goes in the middle of a shelter.
-            if p.kind == .shelter, !kind.fitsUnderShelter, tx <= p.tx + 1, p.tx + 1 < tx + n, tz <= p.tz + 1, p.tz + 1 < tz + n { return false }
-            if kind == .shelter, !p.kind.fitsUnderShelter, p.tx <= tx + 1, tx + 1 < p.tx + p.kind.span, p.tz <= tz + 1, tz + 1 < p.tz + p.kind.span { return false }
-        }
-        return true
-    }
-
-    /// What stops this design from being played, if anything.
-    enum Problem { case noHeart, manyHearts, manyKeeps, manyDecoys, tooSmall, overBudget, overlap }
-    var problem: Problem? {
-        var seen = CastleDesign()
-        for p in pieces {
-            if !seen.fits(p.kind, row: p.tx, col: p.tz) { return .overlap }
-            seen.pieces.append(p)
-        }
-        if hearts == 0 { return .noHeart }
-        if hearts > 1 { return .manyHearts }
-        if keeps > 1 { return .manyKeeps }
-        if decoys > CastleDesign.maxDecoys { return .manyDecoys }
-        if cost > CastleDesign.budget { return .overBudget }
-        if cost < CastleDesign.minimum { return .tooSmall }
-        return nil
-    }
-
-    /// Flat form for storage and the network: kind, row, column per piece, then the heart kind
-    /// as a triple led by `heartTag` when it is not the plain crystal.
-    var encoded: [Int] {
-        pieces.flatMap { [$0.kind.rawValue, $0.tx, $0.tz] } + (heart == .crystal ? [] : [CastleDesign.heartTag, heart.rawValue, 0])
-    }
-    static let heartTag = 100
-
-    /// Rebuilds a design from its flat form. Returns nil for anything that is not a playable castle.
-    init?(encoded: [Int]) {
-        guard let d = CastleDesign.unchecked(encoded), d.problem == nil else { return nil }
-        self = d
-    }
-
-    private static func unchecked(_ encoded: [Int]) -> CastleDesign? {
-        guard encoded.count % 3 == 0, encoded.count <= 3 * (rows * cols + 1) else { return nil }
-        var d = CastleDesign()
-        for i in stride(from: 0, to: encoded.count, by: 3) {
-            if encoded[i] == heartTag {
-                guard let h = HeartKind(rawValue: encoded[i + 1]) else { return nil }
-                d.heart = h
-                continue
-            }
-            guard let k = PieceKind(rawValue: encoded[i]) else { return nil }
-            d.pieces.append(Piece(kind: k, tx: encoded[i + 1], tz: encoded[i + 2]))
-        }
-        return d
-    }
-
-    init(pieces: [Piece] = []) { self.pieces = pieces }
-
-    /// Reads a castle saved before hearts existed: the heart goes on the free tile nearest the back centre.
-    static func migrating(encoded: [Int]) -> CastleDesign? {
-        if let d = CastleDesign(encoded: encoded) { return d }
-        guard var d = unchecked(encoded), d.hearts == 0 else { return nil }
-        var spots: [(Int, Int)] = []
-        for r in 0..<rows { for c in 0..<cols where d.fits(.heart, row: r, col: c) { spots.append((r, c)) } }
-        let mid = cols / 2
-        guard let best = spots.min(by: { abs($0.0 - 2) * 2 + abs($0.1 - mid) < abs($1.0 - 2) * 2 + abs($1.1 - mid) }) else { return nil }
-        d.pieces.append(Piece(kind: .heart, tx: best.0, tz: best.1))
+    /// Reads a castle in either flat form: bricks, or the piece layout from before bricks.
+    static func decode(_ e: [Int]) -> BrickDesign? {
+        if let d = BrickDesign(encoded: e) { return d }
+        guard let old = CastleDesign(encoded: e) else { return nil }
+        let d = BrickDesign(legacy: old)
         return d.problem == nil ? d : nil
     }
-
-    /// Reads a drawing: one string per tile row, back of the castle first.
-    /// w/W low/high wall, S reinforced wall, T tower, A tall tower, B bastion, K keep, R shelter (top-left tile of the piece),
-    /// H heart, D decoy, M moat, anything else empty.
-    init(map: [String]) {
-        var out: [Piece] = []
-        for (r, line) in map.enumerated() {
-            for (c, ch) in line.enumerated() {
-                let kind: PieceKind?
-                switch ch {
-                case "w": kind = .wallLow
-                case "W": kind = .wallHigh
-                case "T": kind = .tower
-                case "A": kind = .tallTower
-                case "B": kind = .bastion
-                case "K": kind = .keep
-                case "H": kind = .heart
-                case "S": kind = .wallStrong
-                case "R": kind = .shelter
-                case "M": kind = .moat
-                case "D": kind = .decoy
-                default: kind = nil
-                }
-                if let kind { out.append(Piece(kind: kind, tx: r, tz: c)) }
-            }
-        }
-        pieces = out
-    }
-
-    static let classic = CastleDesign(map: [
-        "A+WWWWWWWWWWWA+",
-        "++...........++",
-        "w.............w",
-        "w......H......w",
-        "w.....K++.....w",
-        "w.....+++.....w",
-        "w.....+++.....w",
-        "w.............w",
-        "w.............w",
-        "T+...........T+",
-        "++wwwww.wwwww++",
-    ])
 }
 
-/// Ready-made castles for the computer, the campaign and the daily siege.
-enum Presets {
-    static let outpost = CastleDesign(map: [
-        "...............",
-        "...............",
-        "...T+wwwwwT+...",
-        "...++..H..++...",
-        "...w..K++..w...",
-        "...w..+++..w...",
-        "...w..+++..w...",
-        "...w.......w...",
-        "...T+ww.wwT+...",
-        "...++.....++...",
-        "...MMMMMMMMM...",
-    ])
-    static let longWall = CastleDesign(map: [
-        "T+wwwwwwwwwwwT+",
-        "++...........++",
-        "...............",
-        "..wwwwwwwwwww..",
-        ".......H.......",
-        "......K++......",
-        "......+++......",
-        "......+++......",
-        "..wwwwwwwwwww..",
-        "T+...........T+",
-        "++wwwww.wwwww++",
-    ])
-    static let spires = CastleDesign(map: [
-        "A+..A+...A+..A+",
-        "++ww++www++ww++",
-        ".......H.......",
-        "w.....K++.....w",
-        "w.....+++.....w",
-        "w.....+++.....w",
-        "w......D......w",
-        "...............",
-        "A+..T+...T+..A+",
-        "++ww++w.w++ww++",
-        "...............",
-    ])
-    static let citadel = CastleDesign(map: [
-        "...............",
-        "..B+WWWWWWWB+..",
-        "..++.......++..",
-        "..W.A+.H.A+.W..",
-        "..W.++K++++.W..",
-        "..W...+++...W..",
-        "..W...+++...W..",
-        "..W....D....W..",
-        "..B+WWW.WWWB+..",
-        "..++.......++..",
-        "...............",
-    ])
-    static let bulwark = CastleDesign(map: [
-        "T+wwwwwwwwwwwT+",
-        "++...........++",
-        "w......H......w",
-        "w.....K++.....w",
-        "w.....+++.....w",
-        "w.....+++.....w",
-        "w.............w",
-        "W.............W",
-        "W..B+.....B+..W",
-        "A+.++.....++.A+",
-        "++WSSWW.WWSSW++",
-    ])
-    static let twinWalls = CastleDesign(map: [
-        "T+wwwwwwwwwwwT+",
-        "++...........++",
-        "W.............W",
-        "W...wwwwwww...W",
-        "W...wHK++.w...W",
-        "W...w.+++.w...W",
-        "W...w.+++.w...W",
-        "W...www.www...W",
-        "W.............W",
-        "T+...........T+",
-        "++WWWWW.WWWWW++",
-    ])
-    static let stronghold = CastleDesign(map: [
-        "A+wwwwwwwwwwwA+",
-        "++....R++....++",
-        "w..B+.+H+.B+..w",
-        "w..++.+++.++..w",
-        "w.....K++.....w",
-        "w.....+++.....w",
-        "w.....+++.....w",
-        "w.............w",
-        "w.............w",
-        "A+...........A+",
-        "++WWWWW.WWWWW++",
-    ])
-
-    static let all: [CastleDesign] = [.classic, outpost, longWall, spires, citadel, bulwark, twinWalls, stronghold]
-
-    /// A castle for a quick match against the computer, chosen by the match seed.
-    static func pick(_ seed: UInt32) -> CastleDesign { all[Int(seed % UInt32(all.count))] }
-}
-
-// MARK: - From design to blocks
-
-private struct Plan {
-    var vox = [UInt8](repeating: 0, count: K.cells)
-    var hint = [UInt8](repeating: 0, count: K.cells)
-    var decor: [DecorSpec] = []
-    /// Cells of each decoy heart, and the corner cell of each moat tile.
-    var decoys: [[Int]] = []
-    var moats: [(x: Int, z: Int)] = []
-
-    init() {}
-
-    var heartKind = HeartKind.crystal
-
-    init(_ design: CastleDesign) {
-        heartKind = design.heart
-        for p in design.pieces { add(p) }
-    }
-
-    mutating func set(_ x: Int, _ y: Int, _ z: Int, _ m: UInt8, _ h: UInt8 = 0) {
-        guard x >= 0, x < K.gw, y >= 0, y < K.gh, z >= 0, z < K.gd else { return }
-        let i = cellIndex(x, y, z)
-        vox[i] = m
-        hint[i] = m == 0 ? 0 : h
-    }
-    mutating func box(_ x0: Int, _ x1: Int, _ y0: Int, _ y1: Int, _ z0: Int, _ z1: Int, _ m: UInt8, _ h: UInt8 = 0) {
-        for y in y0...y1 { for x in x0...x1 { for z in z0...z1 { set(x, y, z, m, h) } } }
-    }
-    mutating func ring(_ x0: Int, _ x1: Int, _ y0: Int, _ y1: Int, _ z0: Int, _ z1: Int, _ m: UInt8) {
-        for y in y0...y1 { for x in x0...x1 { for z in z0...z1 where x == x0 || x == x1 || z == z0 || z == z1 { set(x, y, z, m) } } }
-    }
-    mutating func crenel(_ x0: Int, _ x1: Int, _ y: Int, _ z0: Int, _ z1: Int, _ m: UInt8) {
-        for x in x0...x1 { for z in z0...z1 where (x == x0 || x == x1 || z == z0 || z == z1) && (x + z) % 2 == 0 { set(x, y, z, m) } }
-    }
-
-    mutating func add(_ p: Piece) {
-        let x0 = p.tx * 2, z0 = p.tz * 2
-        switch p.kind {
-        case .wallLow: wall(x0, z0, 5)
-        case .wallHigh: wall(x0, z0, 8)
-        case .tower: tower(x0, z0, 10)
-        case .tallTower: tower(x0, z0, 14)
-        case .bastion: bastion(x0, z0)
-        case .keep: keep(x0, z0)
-        case .heart: heart(x0, z0)
-        case .wallStrong: strongWall(x0, z0)
-        case .shelter: shelter(x0, z0)
-        case .moat: moats.append((x0, z0))
-        case .decoy: decoy(x0, z0)
-        }
-    }
-
-    /// Looks exactly like the heart from across the river. Breaking it wins nothing.
-    private mutating func decoy(_ x0: Int, _ z0: Int) {
-        box(x0, x0 + 1, 0, 2, z0, z0 + 1, 6)
-        var cells: [Int] = []
-        for y in 0...2 { for x in x0...x0 + 1 { for z in z0...z0 + 1 { cells.append(cellIndex(x, y, z)) } } }
-        decoys.append(cells)
-    }
-
-    /// Iron-banded wall: every stone in it takes two blasts to break.
-    private mutating func strongWall(_ x0: Int, _ z0: Int) {
-        box(x0, x0 + 1, 0, 5, z0, z0 + 1, 5)
-        for x in x0...x0 + 1 { for z in z0...z0 + 1 where (x + z) % 2 == 0 { set(x, 6, z, 5) } }
-    }
-
-    /// A stone roof on two side walls over a 3×3 tile area, open front and back. Its middle tile
-    /// holds the heart, out of reach of shots that drop from above.
-    private mutating func shelter(_ x0: Int, _ z0: Int) {
-        box(x0, x0 + 5, 0, 5, z0, z0, 1)
-        box(x0, x0 + 5, 0, 5, z0 + 5, z0 + 5, 1)
-        box(x0, x0 + 5, 6, 6, z0, z0 + 5, 3, 2)          // laid across, so every slab rests on a side wall
-        crenel(x0, x0 + 5, 7, z0, z0 + 5, 1)
-    }
-
-    /// The heart: three courses of glowing crystal, harder to break than stone. Lose it and the castle falls.
-    private mutating func heart(_ x0: Int, _ z0: Int) {
-        box(x0, x0 + 1, 0, heartKind.courses - 1, z0, z0 + 1, 4)
-    }
-
-    /// Solid wall, two cells thick, with a team-colour top course and battlements.
-    private mutating func wall(_ x0: Int, _ z0: Int, _ h: Int) {
-        box(x0, x0 + 1, 0, h - 2, z0, z0 + 1, 1)
-        box(x0, x0 + 1, h - 1, h - 1, z0, z0 + 1, 2)
-        for x in x0...x0 + 1 { for z in z0...z0 + 1 where (x + z) % 2 == 0 { set(x, h, z, 1) } }
-    }
-
-    /// Hollow 4×4 tower with two floors, arrow slits and a roof.
-    private mutating func tower(_ x0: Int, _ z0: Int, _ h: Int) {
-        ring(x0, x0 + 3, 0, h - 1, z0, z0 + 3, 1)
-        let mid = (h / 2) & ~1
-        box(x0, x0 + 3, mid, mid, z0, z0 + 3, 3)
-        for y in [h - 3, h - 2] {
-            set(x0 + 1, y, z0, 0); set(x0 + 2, y, z0 + 3, 0); set(x0, y, z0 + 2, 0); set(x0 + 3, y, z0 + 1, 0)
-        }
-        box(x0, x0 + 3, h, h, z0, z0 + 3, 3)
-        crenel(x0, x0 + 3, h + 1, z0, z0 + 3, 1)
-        box(x0 + 1, x0 + 2, h + 1, h + 1, z0 + 1, z0 + 2, 2)
-        decor.append(DecorSpec(x: Double(x0) + 2, y: Double(h + 2), z: Double(z0) + 2, w: 1.6, d: 1.6, ht: 3.4, flag: false,
-                               cells: [[x0 + 1, h + 1, z0 + 1], [x0 + 2, h + 1, z0 + 2], [x0 + 1, h + 1, z0 + 2], [x0 + 2, h + 1, z0 + 1]]))
-    }
-
-    /// Low, solid 4×4 block: little to knock off, nothing to collapse.
-    private mutating func bastion(_ x0: Int, _ z0: Int) {
-        box(x0, x0 + 3, 0, 4, z0, z0 + 3, 1)
-        box(x0, x0 + 3, 5, 5, z0, z0 + 3, 2)
-        crenel(x0, x0 + 3, 6, z0, z0 + 3, 1)
-    }
-
-    /// Hollow 6×6 keep with three floors, a turret and the flag.
-    private mutating func keep(_ x0: Int, _ z0: Int) {
-        ring(x0, x0 + 5, 0, 9, z0, z0 + 5, 1)
-        for l in [4, 8, 10] { box(x0, x0 + 5, l, l, z0, z0 + 5, 3, 1) }
-        crenel(x0, x0 + 5, 11, z0, z0 + 5, 1)
-        ring(x0 + 1, x0 + 4, 11, 12, z0 + 1, z0 + 4, 2)
-        box(x0 + 1, x0 + 4, 13, 13, z0 + 1, z0 + 4, 3, 1)
-        box(x0 + 5, x0 + 5, 0, 2, z0 + 2, z0 + 3, 0)                     // door, facing the enemy
-        for c in [[x0 + 5, 6, z0 + 1], [x0 + 5, 6, z0 + 4], [x0, 6, z0 + 2], [x0 + 2, 6, z0], [x0 + 3, 6, z0 + 5]] { set(c[0], c[1], c[2], 0) }
-        decor.append(DecorSpec(x: Double(x0) + 3, y: 14, z: Double(z0) + 3, w: 2.35, d: 2.35, ht: 4.2, flag: true,
-                               cells: [[x0 + 1, 13, z0 + 1], [x0 + 4, 13, z0 + 4], [x0 + 1, 13, z0 + 4], [x0 + 4, 13, z0 + 1]]))
-    }
-}
-
-/// Cuts the voxel plan into 1×N blocks (N ≤ 4) laid in running bond.
-private func tile(_ plan: Plan) -> (blocks: [Block], cellBlock: [Int]) {
-    let vox = plan.vox, hint = plan.hint
-    var blocks: [Block] = []
-    var cellBlock = [Int](repeating: -1, count: K.cells)
-
-    func run(_ x: Int, _ y: Int, _ z: Int, _ dx: Int, _ dz: Int) -> Int {
-        let m = vox[cellIndex(x, y, z)]
-        var n = 1
-        for s in [-1, 1] {
-            var i = 1
-            while true {
-                let xx = x + dx * i * s, zz = z + dz * i * s
-                if xx < 0 || xx >= K.gw || zz < 0 || zz >= K.gd || vox[cellIndex(xx, y, zz)] != m { break }
-                n += 1; i += 1
-            }
-        }
-        return n
-    }
-    func dirOf(_ x: Int, _ y: Int, _ z: Int) -> Int {
-        let h = Int(hint[cellIndex(x, y, z)])
-        if h != 0 { return h }
-        let rx = run(x, y, z, 1, 0), rz = run(x, y, z, 0, 1)
-        if rx == 1 && rz == 1 { return 0 }
-        if rx > rz { return 1 }
-        if rz > rx { return 2 }
-        return y % 2 == 1 ? 2 : 1
-    }
-    for y in 0..<K.gh { for x in 0..<K.gw { for z in 0..<K.gd {
-        let i = cellIndex(x, y, z), m = vox[i]
-        if m == 0 || cellBlock[i] >= 0 { continue }
-        let d = dirOf(x, y, z), id = blocks.count, off = (y % 2) * 2
-        var len = 1, cx = x, cz = z
-        cellBlock[i] = id
-        if d != 0 {
-            while len < 4 {
-                let nx = cx + (d == 1 ? 1 : 0), nz = cz + (d == 2 ? 1 : 0)
-                if nx >= K.gw || nz >= K.gd { break }
-                if ((d == 1 ? nx : nz) + off) % 4 == 0 { break }
-                let j = cellIndex(nx, y, nz)
-                if vox[j] != m || cellBlock[j] >= 0 || dirOf(nx, y, nz) != d { break }
-                cellBlock[j] = id; len += 1; cx = nx; cz = nz
-            }
-        }
-        blocks.append(Block(id: id, x: x, y: y, z: z, len: len, dir: d == 2 ? 2 : 1, mat: m))
-    } } }
-    return (blocks, cellBlock)
-}
-
-// MARK: - Castle state
-
+/// One castle in a match: the design as built and where every brick is now.
 final class Castle {
     let side: Int
-    /// The castle's frame: its back corner on the ground, the way its front faces (local x) and its right (local z).
-    let origin: Vec3
-    let fx: Double, fz: Double, rx: Double, rz: Double
-    private(set) var blocks: [Block]
-    let cellBlock: [Int]
-    let decor: [DecorSpec]
-    let total: Int
-    private(set) var aliveCells: Int
-    /// Heart cells at the start and now. The castle falls when the last one is gone.
-    let heartTotal: Int
-    private(set) var heartAlive: Int
-    /// Decoy heart of each decoy block, and which decoys have been found out.
-    let decoyOf: [Int: Int]
-    private(set) var decoyRevealed: [Bool]
-    /// Corner cells of the moat tiles. A shot that lands in one only splashes.
-    let moats: [(x: Int, z: Int)]
+    let design: BrickDesign
+    let frame: CastleFrame
     let heartKind: HeartKind
+    /// Every brick at home, full health.
+    let home: CastleSnapshot
+    private(set) var snap: CastleSnapshot
+    /// Mass of every brick that can stand or fall.
+    let total: Double
+    let heartIndex: Int?
+    /// Decoy bricks, and which of them have been found out.
+    let decoys: [Int]
+    private(set) var decoyRevealed: [Bool]
+    private(set) var heartGone = false
+    /// Moat cells, as the minimum corner in snap steps.
+    let moats: [(x: Int, z: Int)]
+    /// Bricks each brick rests on, as built.
+    let supporters: [[Int]]
+    private(set) var pct = 1.0
+    /// Bricks standing at home with nothing standing above them: where the gold target may go.
+    private(set) var open: [Int] = []
+    /// Local box around every brick still in one piece.
+    private(set) var lo = SIMD3<Double>(0, 0, 0), hi = SIMD3<Double>(0, 0, 0)
 
-    init(side: Int, design: CastleDesign, arena: Arena = .duel) {
+    init(side: Int, design: BrickDesign, arena: Arena = .duel) {
         self.side = side
-        let f = arena.forward(side), r = arena.right(side)
-        fx = f.x; fz = f.z; rx = r.x; rz = r.z
-        origin = Vec3(x: -K.xEdge * f.x, y: 0, z: -K.xEdge * f.z)
-        let plan = Plan(design)
-        let t = tile(plan)
-        blocks = t.blocks
-        cellBlock = t.cellBlock
-        decor = plan.decor
-        var sup = [Bool](repeating: false, count: t.blocks.count)
-        var sum = 0, hearts = 0
-        for i in blocks.indices {
-            if Castle.supported(blocks[i], sup, cellBlock) {
-                sup[i] = true
-                sum += blocks[i].len
-                if blocks[i].mat == 4 { hearts += blocks[i].len }
-            } else { blocks[i].alive = false; blocks[i].ghost = true }
-        }
-        total = max(1, sum)
-        aliveCells = sum
-        heartTotal = hearts
-        heartAlive = hearts
-        var dOf: [Int: Int] = [:]
-        for (i, cells) in plan.decoys.enumerated() {
-            for c in cells where t.cellBlock[c] >= 0 { dOf[t.cellBlock[c]] = i }
-        }
-        decoyOf = dOf
-        decoyRevealed = Array(repeating: false, count: plan.decoys.count)
-        moats = plan.moats
+        self.design = design
+        frame = CastleFrame(seat: side, arena: arena)
         heartKind = design.heart
-        for i in blocks.indices where blocks[i].mat == 5 { blocks[i].hp = 2 }
+        home = CastleSnapshot(design: design)
+        snap = home
+        let bricks = design.bricks
+        total = max(0.001, bricks.reduce(0) { $0 + ($1.shape.isDecal ? 0 : $1.mass) })
+        heartIndex = bricks.firstIndex { $0.material == .heart }
+        decoys = bricks.indices.filter { bricks[$0].material == .decoy }
+        decoyRevealed = Array(repeating: false, count: decoys.count)
+        moats = bricks.filter { $0.shape.isDecal }.map { ($0.x, $0.z) }
+        supporters = bricks.map { b in bricks.indices.filter { bricks[$0].supports(b) } }
+        refresh()
     }
 
-    private static func supported(_ b: Block, _ sup: [Bool], _ cellBlock: [Int]) -> Bool {
-        if b.y == 0 { return true }
-        for i in 0..<b.len {
-            let id = cellBlock[cellIndex(b.x + (b.dir == 1 ? i : 0), b.y - 1, b.z + (b.dir == 2 ? i : 0))]
-            if id >= 0 && sup[id] { return true }
-        }
-        return false
+    var bricks: [PlacedBrick] { design.bricks }
+    var heartLost: Bool { heartGone }
+
+    /// The brick is in one piece, close to where it was built and the right way up.
+    func isHome(_ i: Int) -> Bool {
+        let p = snap.poses[i], h = home.poses[i]
+        guard !p.broken else { return false }
+        let d = p.pos - h.pos
+        if (d * d).sum() > K.homeReach * K.homeReach { return false }
+        let up = SIMD3<Double>(0, 1, 0)
+        let a = rotate(up, by: p.q), b = rotate(up, by: h.q)
+        return (a * b).sum() >= K.upright
     }
 
-    var pct: Double { Double(aliveCells) / Double(total) }
-    var heartPct: Double { heartTotal == 0 ? 0 : Double(heartAlive) / Double(heartTotal) }
-    var heartLost: Bool { heartAlive <= 0 }
+    /// A heart or decoy that is broken or knocked well away from its spot.
+    func crystalGone(_ i: Int) -> Bool {
+        let p = snap.poses[i]
+        if p.broken { return true }
+        let d = p.pos - home.poses[i].pos
+        return (d * d).sum() > K.heartReach * K.heartReach
+    }
 
-    /// Middle of what is left of the heart, if anything is.
-    var heartCenter: Vec3? { middle(blocks.filter { $0.alive && $0.mat == 4 }) }
+    var heartPct: Double {
+        guard let h = heartIndex, !heartGone, !crystalGone(h) else { return 0 }
+        return Double(snap.poses[h].hp) / Double(max(1, design.hp(design.bricks[h])))
+    }
 
-    /// Middle of a decoy, whether or not it has been found out.
-    func decoyCenter(_ i: Int) -> Vec3? { middle(blocks.filter { $0.alive && decoyOf[$0.id] == i }) }
+    /// World centre of a brick where it is now.
+    func center(_ i: Int) -> Vec3 { frame.world(snap.poses[i].pos) }
+
+    /// Middle of the heart, if it still stands.
+    var heartCenter: Vec3? { heartIndex.flatMap { heartGone ? nil : center($0) } }
+    func decoyCenter(_ k: Int) -> Vec3? { crystalGone(decoys[k]) ? nil : center(decoys[k]) }
 
     /// Everything an attacker would take for the heart: the real one and the decoys not yet found out.
     var heartLookalikes: [Vec3] {
         var out: [Vec3] = []
         if let h = heartCenter { out.append(h) }
-        for i in decoyRevealed.indices where !decoyRevealed[i] { if let c = decoyCenter(i) { out.append(c) } }
+        for k in decoys.indices where !decoyRevealed[k] { if let c = decoyCenter(k) { out.append(c) } }
         return out
     }
 
-    private func middle(_ live: [Block]) -> Vec3? {
-        guard !live.isEmpty else { return nil }
-        var c = Vec3()
-        for b in live { let p = center(of: b); c.x += p.x; c.y += p.y; c.z += p.z }
-        let n = Double(live.count)
-        return Vec3(x: c.x / n, y: c.y / n, z: c.z / n)
-    }
-
-    /// True when a world point on the ground lies in one of this castle's moats.
-    /// A world point in grid units: x from the back toward the front, z from the owner's left.
+    /// A world point in castle units: x from the back toward the front, z from the owner's left.
     func local(_ px: Double, _ pz: Double) -> (x: Double, z: Double) {
-        let dx = px - origin.x, dz = pz - origin.z
-        return (dx * fx + dz * fz, dx * rx + dz * rz + Double(K.gd) / 2)
+        let l = frame.local(px, 0, pz)
+        return (l.x, l.z)
     }
 
     /// True when a castle's local x axis runs along the world x axis (seats west and east).
-    var alongWorldX: Bool { fx != 0 }
+    var alongWorldX: Bool { frame.fx != 0 }
 
     func inMoat(_ px: Double, _ pz: Double) -> Bool {
-        let (lx, lz) = local(px, pz)
-        return moats.contains { lx >= Double($0.x) && lx <= Double($0.x + 2) && lz >= Double($0.z) && lz <= Double($0.z + 2) }
+        let (lx, lz) = local(px, pz), s = BK.step
+        return moats.contains { lx >= Double($0.x) * s && lx <= Double($0.x + 2) * s && lz >= Double($0.z) * s && lz <= Double($0.z + 2) * s }
     }
 
-    func center(of b: Block) -> Vec3 {
-        let lx = Double(b.x) + (b.dir == 1 ? Double(b.len) / 2 : 0.5)
-        let lz = Double(b.z) + (b.dir == 2 ? Double(b.len) / 2 : 0.5)
-        return worldPoint(gx: lx, gy: Double(b.y) + 0.5, gz: lz)
+    /// The brick a ball of radius `K.ballR` at this world point touches, if any.
+    func hit(_ px: Double, _ py: Double, _ pz: Double) -> Int? {
+        let r = K.ballR, l = frame.local(px, py, pz)
+        if l.x < lo.x - r || l.y < lo.y - r || l.z < lo.z - r || l.x > hi.x + r || l.y > hi.y + r || l.z > hi.z + r { return nil }
+        var best: Int?, bestD = r * r
+        for (i, b) in design.bricks.enumerated() where !b.shape.isDecal {
+            let p = snap.poses[i]
+            if p.broken { continue }
+            let d = l - p.pos, reach = b.shape.reach + r
+            if (d * d).sum() > reach * reach { continue }
+            let dl = rotate(d, by: p.q, inverse: true)
+            for box in b.shape.boxes {
+                let q = dl - box.c
+                let c = SIMD3(min(max(q.x, -box.h.x), box.h.x), min(max(q.y, -box.h.y), box.h.y), min(max(q.z, -box.h.z), box.h.z))
+                let e = q - c, dd = (e * e).sum()
+                if dd <= bestD { bestD = dd; best = i }
+            }
+        }
+        return best
     }
 
-    func worldPoint(gx: Double, gy: Double, gz: Double) -> Vec3 {
-        let w = gz - Double(K.gd) / 2
-        return Vec3(x: origin.x + gx * fx + w * rx, y: gy * K.lh, z: origin.z + gx * fz + w * rz)
+    /// Point on the ground-level box around the castle closest to a world point, and how far away it is.
+    func distance(to w: Vec3) -> Double {
+        let l = frame.local(w.x, w.y, w.z)
+        let dx = max(lo.x - l.x, 0, l.x - hi.x), dz = max(lo.z - l.z, 0, l.z - hi.z), dy = max(0, l.y - hi.y)
+        return (dx * dx + dy * dy + dz * dz).squareRoot()
     }
 
-    func hit(_ px: Double, _ py: Double, _ pz: Double) -> Bool {
-        let r = K.ballR, (lx, lz) = local(px, pz)
-        if lx < -r || lx > Double(K.gw) + r || lz < -r || lz > Double(K.gd) + r || py > Double(K.gh) * K.lh + r { return false }
-        let xa = max(0, Int((lx - r).rounded(.down))), xb = min(K.gw - 1, Int((lx + r).rounded(.down)))
-        let ya = max(0, Int(((py - r) / K.lh).rounded(.down))), yb = min(K.gh - 1, Int(((py + r) / K.lh).rounded(.down)))
-        let za = max(0, Int((lz - r).rounded(.down))), zb = min(K.gd - 1, Int((lz + r).rounded(.down)))
-        if xa > xb || ya > yb || za > zb { return false }
-        for gy in ya...yb { for gx in xa...xb { for gz in za...zb {
-            let id = cellBlock[cellIndex(gx, gy, gz)]
-            if id < 0 || !blocks[id].alive { continue }
-            let cx = min(max(lx, Double(gx)), Double(gx + 1)) - lx
-            let cy = min(max(py, Double(gy) * K.lh), Double(gy + 1) * K.lh) - py
-            let cz = min(max(lz, Double(gz)), Double(gz + 1)) - lz
-            if cx * cx + cy * cy + cz * cz <= r * r { return true }
-        } } }
-        return false
-    }
-
-    /// Blocks removed by a blast at a world point plus everything left with nothing underneath. Does not change state.
-    func damage(at c: Vec3, radius R: Double = K.blastR) -> Damage {
+    /// Reads a settled snapshot: what it cost the castle, which decoys it gave away.
+    func settle(_ next: CastleSnapshot) -> Damage {
+        guard next.poses.count == snap.poses.count else { return Damage() }
         var out = Damage()
-        let (lx, lz) = local(c.x, c.z)
-        if lx < -R || lx > Double(K.gw) + R || lz < -R || lz > Double(K.gd) + R { return out }
-        var dead = [Bool](repeating: false, count: blocks.count)
-        let r2 = R * R, h2 = r2 * K.heartReach * K.heartReach
-        for b in blocks where b.alive {
-            for i in 0..<b.len {
-                let dx = Double(b.x + (b.dir == 1 ? i : 0)) + 0.5 - lx
-                let dy = (Double(b.y) + 0.5) * K.lh - c.y
-                let dz = Double(b.z + (b.dir == 2 ? i : 0)) + 0.5 - lz
-                // Decoys break like the heart, so a near miss tells nothing either way.
-                if dx * dx + dy * dy + dz * dz <= (b.mat == 4 || b.mat == 6 ? h2 : r2) {
-                    if b.hp > 1 { out.crack.append(b.id); break }
-                    dead[b.id] = true; out.blast.append(b.id); out.cells += b.len
-                    if b.mat == 4 { out.heart += b.len }
-                    if let d = decoyOf[b.id], !decoyRevealed[d], !out.decoys.contains(d) { out.decoys.append(d) }
-                    break
-                }
-            }
+        let beforePct = pct, beforeHeart = heartPct
+        let wasHome = snap.poses.indices.map(isHome)
+        let old = snap
+        snap = next
+        for i in snap.poses.indices where !design.bricks[i].shape.isDecal {
+            let a = old.poses[i], b = snap.poses[i]
+            if !a.broken && b.broken { out.broken.append(i) }
+            else if !b.broken && b.hp < a.hp { out.crack.append(i) }
+            else if wasHome[i] && !b.broken && !isHome(i) { out.moved += 1 }
         }
-        if out.blast.isEmpty { return out }
-        var sup = [Bool](repeating: false, count: blocks.count)
-        for b in blocks where b.alive && !dead[b.id] {
-            if Castle.supported(b, sup, cellBlock) { sup[b.id] = true } else {
-                out.fall.append(b.id); out.cells += b.len
-                if b.mat == 4 { out.heart += b.len }
-                if let d = decoyOf[b.id], !decoyRevealed[d], !out.decoys.contains(d) { out.decoys.append(d) }
-            }
+        if let h = heartIndex, !heartGone, crystalGone(h) { heartGone = true }
+        for k in decoys.indices where !decoyRevealed[k] && crystalGone(decoys[k]) {
+            decoyRevealed[k] = true
+            out.decoys.append(k)
         }
+        refresh()
+        out.lost = max(0, beforePct - pct)
+        out.heart = max(0, beforeHeart - heartPct)
         return out
     }
 
-    /// True when nothing stands above at least one cell of the block, so a falling shot can reach it.
-    func isOpenToSky(_ b: Block) -> Bool {
-        for i in 0..<b.len {
-            let x = b.x + (b.dir == 1 ? i : 0), z = b.z + (b.dir == 2 ? i : 0)
-            var covered = false
-            var y = b.y + 1
-            while y < K.gh {
-                let id = cellBlock[cellIndex(x, y, z)]
-                if id >= 0 && blocks[id].alive { covered = true; break }
-                y += 1
-            }
-            if !covered { return true }
-        }
-        return false
+    /// Takes over the bricks of an earlier match against the same design: what fell stays down.
+    func adopt(_ s: CastleSnapshot) {
+        guard s.poses.count == snap.poses.count else { return }
+        snap = s
+        refresh()
     }
 
-    func kill(_ d: Damage) {
-        for id in d.blast { blocks[id].alive = false }
-        for id in d.fall { blocks[id].alive = false }
-        aliveCells -= d.cells
-        heartAlive -= d.heart
-        for id in d.crack where blocks[id].alive && blocks[id].hp > 1 { blocks[id].hp -= 1 }
-        for i in d.decoys { decoyRevealed[i] = true }
-    }
-
-    /// Takes over the state of an earlier castle built from the same design: what fell stays down.
-    func adopt(_ other: Castle) {
-        guard other.blocks.count == blocks.count else { return }
-        for i in blocks.indices { blocks[i].alive = other.blocks[i].alive; blocks[i].hp = other.blocks[i].hp }
-        decoyRevealed = other.decoyRevealed
-        aliveCells = other.aliveCells
-        heartAlive = other.heartAlive
-    }
-
-    /// A living heart grows back one lost crystal block. Returns it, if one could grow.
+    /// A living heart mends one crack. Returns the heart brick if it did.
     func regrowHeart() -> Int? {
-        guard heartKind == .living, heartAlive > 0, heartAlive < heartTotal else { return nil }
-        for i in blocks.indices where blocks[i].mat == 4 && !blocks[i].alive && !blocks[i].ghost {
-            let b = blocks[i]
-            var held = b.y == 0
-            if !held {
-                for k in 0..<b.len {
-                    let id = cellBlock[cellIndex(b.x + (b.dir == 1 ? k : 0), b.y - 1, b.z + (b.dir == 2 ? k : 0))]
-                    if id >= 0 && blocks[id].alive { held = true; break }
-                }
-            }
-            guard held else { continue }
-            blocks[i].alive = true
-            aliveCells += b.len
-            heartAlive += b.len
-            return i
-        }
-        return nil
+        guard heartKind == .living, let h = heartIndex, !heartGone, !crystalGone(h) else { return nil }
+        let full = Int8(design.hp(design.bricks[h]))
+        guard snap.poses[h].hp < full else { return nil }
+        snap.poses[h].hp += 1
+        refresh()
+        return h
     }
 
-    /// Puts fallen blocks back, lowest first, as long as each has something to stand on. Returns what was rebuilt.
-    func repair(cells budget: Int) -> [Int] {
+    /// Puts broken and fallen bricks back where they were built, lowest first, as long as each
+    /// has something to stand on and nothing lies in its spot. Returns what was put back.
+    func repair(mass budget: Double) -> [Int] {
         var left = budget, out: [Int] = []
-        for i in blocks.indices where !blocks[i].alive && !blocks[i].ghost {
-            let b = blocks[i]
-            if b.len > left { continue }
-            var held = b.y == 0
-            if !held {
-                for k in 0..<b.len {
-                    let id = cellBlock[cellIndex(b.x + (b.dir == 1 ? k : 0), b.y - 1, b.z + (b.dir == 2 ? k : 0))]
-                    if id >= 0 && blocks[id].alive { held = true; break }
-                }
-            }
-            if held {
-                blocks[i].alive = true; blocks[i].hp = b.mat == 5 ? 2 : 1; left -= b.len; aliveCells += b.len; out.append(i)
-                if b.mat == 4 { heartAlive += b.len }
-            }
+        let order = design.bricks.indices.sorted { (design.bricks[$0].y, $0) < (design.bricks[$1].y, $1) }
+        for i in order where !design.bricks[i].shape.isDecal && !isHome(i) {
+            let b = design.bricks[i]
+            if b.material == .heart { continue }
+            if b.mass > left { continue }
+            guard b.y == 0 || supporters[i].contains(where: isHome) else { continue }
+            guard spotIsFree(i) else { continue }
+            snap.poses[i] = home.poses[i]
+            left -= b.mass
+            out.append(i)
             if left <= 0 { break }
         }
+        if !out.isEmpty { refresh() }
         return out
+    }
+
+    /// No other brick lies across brick `i`'s home spot.
+    private func spotIsFree(_ i: Int) -> Bool {
+        let b = design.bricks[i], e = b.extent, s = BK.step
+        let lo0 = SIMD3(Double(b.x), Double(b.y), Double(b.z)) * s + 0.15
+        let hi0 = SIMD3(Double(b.x + e.x), Double(b.y + e.y), Double(b.z + e.z)) * s - 0.15
+        for (k, o) in design.bricks.enumerated() where k != i && !o.shape.isDecal {
+            let p = snap.poses[k]
+            if p.broken { continue }
+            let box = localBox(k)
+            if box.lo.x < hi0.x && box.hi.x > lo0.x && box.lo.y < hi0.y && box.hi.y > lo0.y && box.lo.z < hi0.z && box.hi.z > lo0.z { return false }
+        }
+        return true
+    }
+
+    /// Local axis-aligned box around brick `k` where it is now.
+    func localBox(_ k: Int) -> (lo: SIMD3<Double>, hi: SIMD3<Double>) {
+        let p = snap.poses[k], s = design.bricks[k].shape.size
+        let h = SIMD3(Double(s.x), Double(s.y), Double(s.z)) * (BK.step / 2)
+        let ax = rotate(SIMD3(h.x, 0, 0), by: p.q), ay = rotate(SIMD3(0, h.y, 0), by: p.q), az = rotate(SIMD3(0, 0, h.z), by: p.q)
+        let ext = SIMD3(abs(ax.x) + abs(ay.x) + abs(az.x), abs(ax.y) + abs(ay.y) + abs(az.y), abs(ax.z) + abs(ay.z) + abs(az.z))
+        return (p.pos - ext, p.pos + ext)
+    }
+
+    /// Recomputes what depends on the snapshot: standing share, bounds and the open bricks.
+    private func refresh() {
+        var standing = 0.0
+        var home = [Bool](repeating: false, count: design.bricks.count)
+        lo = SIMD3(repeating: .greatestFiniteMagnitude); hi = SIMD3(repeating: -.greatestFiniteMagnitude)
+        for (i, b) in design.bricks.enumerated() where !b.shape.isDecal {
+            if snap.poses[i].broken { continue }
+            let box = localBox(i)
+            lo = SIMD3(min(lo.x, box.lo.x), min(lo.y, box.lo.y), min(lo.z, box.lo.z))
+            hi = SIMD3(max(hi.x, box.hi.x), max(hi.y, box.hi.y), max(hi.z, box.hi.z))
+            if isHome(i) { home[i] = true; standing += b.mass }
+        }
+        if lo.x > hi.x { lo = .zero; hi = .zero }
+        pct = standing / total
+        let bricks = design.bricks
+        open = bricks.indices.filter { i in
+            let b = bricks[i]
+            guard home[i], b.y >= 2, !b.shape.isDecal else { return false }
+            let e = b.extent
+            return !bricks.indices.contains { j in
+                guard j != i, home[j] else { return false }
+                let o = bricks[j], f = o.extent
+                return o.y >= b.y + e.y && o.x < b.x + e.x && b.x < o.x + f.x && o.z < b.z + e.z && b.z < o.z + f.z
+            }
+        }
+    }
+
+    // MARK: Structure, for the computer
+
+    /// Mass that would be left with nothing under it if brick `i` went, counting only bricks at home.
+    func unsupported(without i: Int) -> Double {
+        let n = design.bricks.count
+        var held = [Bool](repeating: false, count: n)
+        let order = design.bricks.indices.sorted { design.bricks[$0].y < design.bricks[$1].y }
+        var lost = 0.0
+        for j in order where j != i && !design.bricks[j].shape.isDecal && isHome(j) {
+            if design.bricks[j].y == 0 || supporters[j].contains(where: { held[$0] }) { held[j] = true }
+            else { lost += design.bricks[j].mass }
+        }
+        return lost
     }
 }
 
@@ -937,16 +558,16 @@ final class Battle {
     private(set) var streak: [Int]
     /// Special shots left, per side, indexed by `Ammo.rawValue`.
     private(set) var stock: [[Int]]
-    /// A shielded castle takes the next blast at reduced radius.
+    /// A shielded castle takes the next shot's impulses at `K.shieldFactor`.
     private(set) var shield: [Bool]
     private(set) var pickup: Pickup?
     private var nextSpawn = 2
     /// An aegis heart shields its castle once per match.
     private(set) var aegisUsed: [Bool]
-    /// Heart block that grew back at the start of the last turn, and on which side.
+    /// Heart brick that mended at the start of the last turn, and on which side.
     private(set) var regrown: (side: Int, block: Int)?
 
-    init(seed: UInt32, first: Int, designs: [CastleDesign] = [.classic, .classic], rules: MatchRules = MatchRules(), arena: Arena = .duel) {
+    init(seed: UInt32, first: Int, designs: [BrickDesign] = [Presets.classic, Presets.classic], rules: MatchRules = MatchRules(), arena: Arena = .duel) {
         self.seed = seed
         self.first = first
         self.rules = rules
@@ -960,6 +581,9 @@ final class Battle {
         shield = Array(repeating: false, count: n)
         aegisUsed = Array(repeating: false, count: n)
     }
+
+    var designs: [BrickDesign] { castles.map { $0.design } }
+    var snapshots: [CastleSnapshot] { castles.map { $0.snap } }
 
     /// Seats still in the match.
     var standing: [Int] { castles.indices.filter { !castles[$0].heartLost } }
@@ -975,13 +599,13 @@ final class Battle {
         return (wx, wz)
     }
 
-    /// This turn's gold target: a block on an enemy castle that is open to the sky.
-    /// Landing a shot within `K.critRange` of it is a critical hit.
+    /// This turn's gold target: a brick on an enemy castle that is open to the sky.
+    /// A shot that first touches within `K.critRange` of it is a critical hit.
     func goldTarget() -> Vec3? {
         var open: [Vec3] = []
         for e in enemies {
             let c = castles[e]
-            for b in c.blocks where b.alive && b.y >= 2 && c.isOpenToSky(b) { open.append(c.center(of: b)) }
+            for i in c.open { open.append(c.center(i)) }
         }
         guard !open.isEmpty else { return nil }
         var r = Mulberry32(seed ^ (UInt32(truncatingIfNeeded: shot + 1) &* 0x85EB_CA6B))
@@ -1010,39 +634,48 @@ final class Battle {
         }
     }
 
-    /// Fixed-step flight. Uses only additions, multiplications, divisions and square roots, so two
-    /// devices fed the same launch position and velocity agree on the result. Returns the outcome
-    /// and the path the ball took.
-    func fly(p0: Vec3, v0: Vec3, wind w: (x: Double, z: Double), ammo wanted: Ammo = .standard, mega wantsMega: Bool = false) -> (res: ShotResult, path: [Vec3]) {
-        let shooter = turn
-        let ammo = wanted != .standard && stock[shooter][wanted.rawValue] > 0 ? wanted : Ammo.standard
-        let mega = wantsMega && ammo == .standard && charge[shooter] >= 1
-        let target = goldTarget()
-        var x = p0.x, y = p0.y, z = p0.z, vx = v0.x, vy = v0.y, vz = v0.z
-        var kind = HitKind.out, side = -1, n = 1
+    /// Where a free flight first touches something.
+    struct Trace {
+        var steps: Int
+        var pos: Vec3
+        var vel: Vec3
+        var kind: HitKind
+        var side: Int
+        var brick: Int?
         var collectedAt: Int?
-        var path = [p0]
-        path.reserveCapacity(600)
+    }
+
+    /// Fixed-step flight up to the first touch. Uses only additions, multiplications, divisions
+    /// and square roots, so two devices fed the same launch agree on it. `homeTo` steers a homing shot.
+    func trace(p0: Vec3, v0: Vec3, wind w: (x: Double, z: Double), homeTo target: Vec3? = nil, path: UnsafeMutablePointer<[Vec3]>? = nil) -> Trace {
+        var x = p0.x, y = p0.y, z = p0.z, vx = v0.x, vy = v0.y, vz = v0.z
+        var kind = HitKind.out, side = -1, n = 1, brick: Int?
+        var collectedAt: Int?
         let r = K.ballR, g = rules.gravity
         while n <= 8000 {
             var ax = w.x, az = w.z
-            if ammo == .homing, vy < 0, let t = target {
+            if vy < 0, let t = target {
                 let dx = t.x - x, dz = t.z - z, d = (dx * dx + dz * dz).squareRoot()
                 if d > 0.5 { ax += K.homing * dx / d; az += K.homing * dz / d }
             }
             vx += ax * K.dt; vy -= g * K.dt; vz += az * K.dt
             x += vx * K.dt; y += vy * K.dt; z += vz * K.dt
-            path.append(Vec3(x: x, y: y, z: z))
+            path?.pointee.append(Vec3(x: x, y: y, z: z))
             if collectedAt == nil, let p = pickup {
                 let dx = x - p.pos.x, dy = y - p.pos.y, dz = z - p.pos.z
                 if dx * dx + dy * dy + dz * dz <= K.pickupRange * K.pickupRange { collectedAt = n }
             }
             if y <= r {
-                y = r; path[path.count - 1].y = r
+                y = r
+                if path != nil { path!.pointee[path!.pointee.count - 1].y = r }
                 kind = arena.isWater(x, z) || castles.contains(where: { $0.inMoat(x, z) }) ? .water : .ground
                 break
             }
-            if let i = castles.firstIndex(where: { $0.hit(x, y, z) }) { kind = .castle; side = i; break }
+            var touched = false
+            for (i, c) in castles.enumerated() {
+                if let b = c.hit(x, y, z) { kind = .castle; side = i; brick = b; touched = true; break }
+            }
+            if touched { break }
             if n > 40 && y < K.platTop + r {
                 var onPlatform = false
                 for i in castles.indices {
@@ -1054,74 +687,61 @@ final class Battle {
             if x > 220 || x < -220 || z > 160 || z < -160 { kind = .out; break }
             n += 1
         }
-        if n > 8000 { n = 8000 }
-        let contact = Vec3(x: x, y: y, z: z)
-        let sp = max(0.001, (vx * vx + vy * vy + vz * vz).squareRoot())
-        let dir = Vec3(x: vx / sp, y: vy / sp, z: vz / sp)
-        var center = contact
-        if kind == .castle {
-            if ammo == .piercer {
-                // Drill on through the stone, then go off deep inside.
-                var gone = 0.0
-                while gone < K.pierceDepth && y > r {
-                    vy -= g * K.dt
-                    x += vx * K.dt; y += vy * K.dt; z += vz * K.dt
-                    gone += sp * K.dt
-                    n += 1
-                    path.append(Vec3(x: x, y: max(y, r), z: z))
-                }
-                center = Vec3(x: x, y: max(y, r), z: z)
-            } else {
-                center = Vec3(x: x + dir.x * 1.2, y: y + dir.y * 1.2, z: z + dir.z * 1.2)
-            }
-        }
-        var res = ShotResult(steps: n, pos: center, vel: Vec3(x: vx, y: vy, z: vz), kind: kind, side: side)
-        res.pos = kind == .castle && ammo == .piercer ? center : contact
+        return Trace(steps: min(n, 8000), pos: Vec3(x: x, y: y, z: z), vel: Vec3(x: vx, y: vy, z: vz), kind: kind, side: side, brick: brick, collectedAt: collectedAt)
+    }
+
+    /// The flight of the side to move, with the path the ball takes.
+    func fly(p0: Vec3, v0: Vec3, wind w: (x: Double, z: Double), ammo wanted: Ammo = .standard, mega wantsMega: Bool = false) -> (res: ShotResult, path: [Vec3]) {
+        let shooter = turn
+        let ammo = wanted != .standard && stock[shooter][wanted.rawValue] > 0 ? wanted : Ammo.standard
+        let mega = wantsMega && ammo == .standard && charge[shooter] >= 1
+        let target = goldTarget()
+        var path = [p0]
+        path.reserveCapacity(600)
+        let t = trace(p0: p0, v0: v0, wind: w, homeTo: ammo == .homing ? target : nil, path: &path)
+        var res = ShotResult(steps: t.steps, pos: t.pos, vel: t.vel, kind: t.kind, side: t.side, brick: t.brick)
+        if t.kind == .castle, let b = t.brick { res.crystal = castles[t.side].bricks[b].material.isCrystal }
         res.shooter = shooter
         res.ammo = ammo
         res.mega = mega
-        res.collectedAt = collectedAt
-        if kind == .castle, side != shooter, let t = target {
-            let dx = contact.x - t.x, dy = contact.y - t.y, dz = contact.z - t.z
+        res.collectedAt = t.collectedAt
+        if t.kind == .castle, t.side != shooter, let g = target {
+            let dx = t.pos.x - g.x, dy = t.pos.y - g.y, dz = t.pos.z - g.z
             res.crit = dx * dx + dy * dy + dz * dz <= K.critRange * K.critRange
-        }
-        if kind == .castle || kind == .ground {
-            var radius = K.blastR * rules.blastScale
-            if mega { radius *= K.megaBoost }
-            if res.crit { radius *= K.critBoost }
-            switch ammo {
-            case .standard:
-                res.blasts = [Blast(center: center, radius: radius)]
-            case .piercer:
-                res.blasts = [Blast(center: center, radius: radius * 0.95)]
-            case .homing:
-                res.blasts = [Blast(center: center, radius: radius * 0.9)]
-            case .cluster:
-                // Three smaller blasts in a row across the line of fire.
-                let hl = max(0.001, (dir.x * dir.x + dir.z * dir.z).squareRoot())
-                let lx = -dir.z / hl * K.clusterSpread, lz = dir.x / hl * K.clusterSpread
-                res.blasts = [-1.0, 0.0, 1.0].map { k in
-                    Blast(center: Vec3(x: center.x + lx * k, y: center.y, z: center.z + lz * k), radius: radius * K.clusterScale)
-                }
-            }
         }
         return (res, path)
     }
 
-    /// Applies a shot: damage, shields, the mega meter, streaks, ammo and any balloon it grabbed.
-    func apply(_ res: ShotResult) -> ShotOutcome {
-        let s = res.shooter, n = castles.count
-        var out = ShotOutcome(damage: Array(repeating: Damage(), count: n))
-        var struck = Array(repeating: false, count: n)
-        for b in res.blasts {
-            for (i, c) in castles.enumerated() {
-                let d = c.damage(at: b.center, radius: b.radius * (shield[i] ? K.shieldFactor : 1))
-                if d.cells > 0 { struck[i] = true }
-                c.kill(d)
-                out.damage[i].add(d)
+    /// What the physics world plays once the ball touches down, or nil when nothing can move:
+    /// a splash, a miss, or a landing too far from every castle.
+    func impact(for res: ShotResult) -> ShotImpact? {
+        switch res.kind {
+        case .out, .water: return nil
+        case .ground: if !castles.contains(where: { $0.distance(to: res.pos) < 6 }) && !res.mega { return nil }
+        case .castle: break
+        }
+        var imp = ShotImpact(point: res.pos, velocity: res.vel, ammo: res.ammo, mega: res.mega, crit: res.crit, shielded: shield)
+        imp.weight = rules.blastScale
+        if res.ammo == .cluster {
+            // Two more balls either side of the first, a little behind it and fanning out.
+            let v = res.vel, hl = max(0.001, (v.x * v.x + v.z * v.z).squareRoot())
+            let dx = v.x / hl, dz = v.z / hl, lx = -dz, lz = dx, sp = v.length
+            imp.extraBalls = [-1.0, 1.0].map { k in
+                (Vec3(x: res.pos.x + lx * k * 1.5 - dx * 1.6, y: res.pos.y + 0.6, z: res.pos.z + lz * k * 1.5 - dz * 1.6),
+                 Vec3(x: v.x + lx * k * sp * 0.14, y: v.y, z: v.z + lz * k * sp * 0.14))
             }
         }
-        for i in 0..<n where shield[i] && (struck[i] || (res.kind == .castle && res.side == i)) {
+        return imp
+    }
+
+    /// Applies a settled shot: damage, shields, the mega meter, streaks, ammo and any balloon it grabbed.
+    func apply(_ res: ShotResult, settle: SettleReport?) -> ShotOutcome {
+        let s = res.shooter, n = castles.count
+        var out = ShotOutcome(damage: Array(repeating: Damage(), count: n))
+        if let settle, settle.snapshots.count == n {
+            for i in 0..<n { out.damage[i] = castles[i].settle(settle.snapshots[i]) }
+        }
+        for i in 0..<n where shield[i] && (out.damage[i].hit || (res.kind == .castle && res.side == i)) {
             shield[i] = false
             out.shieldBroken = i
         }
@@ -1132,16 +752,16 @@ final class Battle {
         }
         if res.ammo != .standard { stock[s][res.ammo.rawValue] = max(0, stock[s][res.ammo.rawValue] - 1) }
         var dealt = 0.0
-        for e in 0..<n where e != s { dealt += Double(out.damage[e].cells) / Double(castles[e].total) }
+        for e in 0..<n where e != s { dealt += out.damage[e].lost + out.damage[e].heart * 0.25 }
         if res.mega { charge[s] = 0 }
-        if dealt > 0 {
+        if dealt > 0 || (0..<n).contains(where: { $0 != s && out.damage[$0].hit }) {
             streak[s] += 1
             if !res.mega {
                 let combo = 1 + 0.2 * Double(min(streak[s] - 1, 3))
-                charge[s] = min(1, charge[s] + (dealt * 2.4 * combo + (res.crit ? 0.15 : 0)) * rules.megaRate)
+                charge[s] = min(1, charge[s] + (dealt * 2.4 * combo + (res.crit ? 0.15 : 0) + 0.04) * rules.megaRate)
             }
-            for e in 0..<n where e != s && out.damage[e].cells > 0 {          // taking damage charges the defender: a way back in
-                charge[e] = min(1, charge[e] + Double(out.damage[e].cells) / Double(castles[e].total) * 1.5 * rules.megaRate)
+            for e in 0..<n where e != s && out.damage[e].lost > 0 {          // taking damage charges the defender: a way back in
+                charge[e] = min(1, charge[e] + out.damage[e].lost * 1.5 * rules.megaRate)
             }
         } else {
             streak[s] = 0
@@ -1149,7 +769,7 @@ final class Battle {
         if res.collectedAt != nil, let p = pickup {
             out.pickup = p.kind
             switch p.kind {
-            case .repair: out.repaired = castles[s].repair(cells: K.repairCells)
+            case .repair: out.repaired = castles[s].repair(mass: castles[s].total * K.repairShare)
             case .shield: shield[s] = true
             case .charge: charge[s] = min(1, charge[s] + 0.5)
             }
@@ -1161,17 +781,6 @@ final class Battle {
 
     /// The side to move let the shot clock run out.
     func forfeitTurn() { streak[turn] = 0 }
-
-    /// The side whose heart this shot would break, worked out before it lands. Overlapping
-    /// blasts can count a block twice, so it may now and then call a shot that falls just short.
-    func wouldBreakHeart(_ res: ShotResult) -> Int? {
-        for (i, c) in castles.enumerated() where c.heartAlive > 0 {
-            var cells = 0
-            for b in res.blasts { cells += c.damage(at: b.center, radius: b.radius * (shield[i] ? K.shieldFactor : 1)).heart }
-            if cells >= c.heartAlive { return i }
-        }
-        return nil
-    }
 
     /// The last heart standing, once there is one. If a shot takes every heart left, the side
     /// that fired it loses.
@@ -1214,10 +823,11 @@ enum Difficulty: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var goldChance: Double { self == .kolay ? 0.15 : self == .orta ? 0.4 : 0.75 }
     var ammoChance: Double { self == .kolay ? 0.1 : self == .orta ? 0.22 : 0.35 }
-    var samples: Int { self == .kolay ? 1 : self == .orta ? 3 : 12 }
-    var heartChance: Double { self == .kolay ? 0.1 : self == .orta ? 0.2 : 0.25 }
-    var yawNoise: Double { self == .kolay ? 5.0 : self == .orta ? 2.2 : 0.7 }
-    var speedNoise: Double { self == .kolay ? 0.075 : self == .orta ? 0.035 : 0.012 }
+    /// Bricks it weighs up before it picks one.
+    var samples: Int { self == .kolay ? 2 : self == .orta ? 5 : 12 }
+    var heartChance: Double { self == .kolay ? 0.06 : self == .orta ? 0.12 : 0.2 }
+    var yawNoise: Double { self == .kolay ? 4.5 : self == .orta ? 2.0 : 0.7 }
+    var speedNoise: Double { self == .kolay ? 0.07 : self == .orta ? 0.032 : 0.012 }
 }
 
 enum Computer {
@@ -1231,7 +841,7 @@ enum Computer {
 
     private static func gauss() -> Double { (Double.random(in: 0...1) + Double.random(in: 0...1) + Double.random(in: 0...1) - 1.5) * 1.15 }
 
-    private static func solve(arena: Arena, side: Int, heading h: Double, target t: Vec3, wind w: (x: Double, z: Double), gravity g: Double) -> (yaw: Double, v: Double)? {
+    static func solve(arena: Arena, side: Int, heading h: Double, target t: Vec3, wind w: (x: Double, z: Double), gravity g: Double) -> (yaw: Double, v: Double)? {
         let pv = arena.pivot(side), ch = cos(h), sh = sin(h)
         func flat(_ x: Double, _ z: Double) -> (Double, Double) { let ax = x - pv.x, az = z - pv.z; return (ax * ch + az * sh, az * ch - ax * sh) }
         let (dx, dz) = flat(t.x, t.z), d = (dx * dx + dz * dz).squareRoot()
@@ -1258,41 +868,73 @@ enum Computer {
     static func pickTarget(battle: Battle, side: Int) -> Int {
         let foes = battle.standing.filter { $0 != side }
         guard foes.count > 1 else { return foes.first ?? battle.arena.across(side) }
-        let low = foes.map { battle.castles[$0].heartPct }.min() ?? 1
-        if low < 1, Double.random(in: 0...1) < 0.55 { return foes.filter { battle.castles[$0].heartPct == low }.randomElement()! }
+        let low = foes.map { battle.castles[$0].heartPct + battle.castles[$0].pct * 0.3 }
+        let best = low.min() ?? 1
+        if best < 1.3, Double.random(in: 0...1) < 0.55, let i = low.firstIndex(of: best) { return foes[i] }
         return foes.randomElement()!
+    }
+
+    /// What it hopes a shot that first touches brick `i` of castle `c` will do: the brick itself,
+    /// everything that rests on it, and a lot for anything that looks like the heart.
+    static func worth(_ c: Castle, brick i: Int, revealed: Bool = false) -> Double {
+        let b = c.bricks[i]
+        var w = b.mass * 0.6 + c.unsupported(without: i)
+        if b.material == .heart || (b.material == .decoy && !revealed) { w += c.total * 0.5 }
+        if b.material == .ice { w += b.mass * 0.6 }          // brittle: it will likely break
+        if b.material == .iron { w -= b.mass * 0.4 }
+        return w
     }
 
     static func choose(battle: Battle, side: Int, difficulty: Difficulty, wind w: (x: Double, z: Double)) -> Choice {
         let foe = pickTarget(battle: battle, side: side)
         let enemy = battle.castles[foe]
-        let alive = enemy.blocks.filter { $0.alive }
-        guard !alive.isEmpty else { return Choice(aim: Aim(target: foe), target: foe) }
         let mega = battle.charge[side] >= 1 && (difficulty != .kolay || Bool.random())
         var ammo = Ammo.standard
         if !mega, Double.random(in: 0...1) < difficulty.ammoChance {
             ammo = Ammo.specials.filter { battle.stock[side][$0.rawValue] > 0 }.randomElement() ?? .standard
         }
-        let radius = K.blastR * battle.rules.blastScale * (mega ? K.megaBoost : 1)
-        func worth(_ d: Damage) -> Int { d.cells + (d.heart > 0 ? 180 : 0) + d.decoys.count * 180 }
-        var best = enemy.center(of: alive[0]), bestScore = -1
-        for _ in 0..<difficulty.samples {
-            let c = enemy.center(of: alive.randomElement()!)
-            let score = worth(enemy.damage(at: c, radius: radius))
-            if score > bestScore { bestScore = score; best = c }
-        }
-        // Sometimes go for the gold target instead; better players do it more often. A homing shot always does.
-        let center = battle.arena.castleCenter(foe)
-        if ammo == .homing || Double.random(in: 0...1) < difficulty.goldChance, let t = battle.goldTarget(),
-           (t.x - center.x) * (t.x - center.x) + (t.z - center.z) * (t.z - center.z) < 400 {
-            let score = worth(enemy.damage(at: t, radius: radius * K.critBoost))
-            if ammo == .homing || score > bestScore { bestScore = score; best = t }
-        }
-        // Going straight for the heart: the walls in front of it are what stops this.
-        // It cannot tell a decoy from the heart until one breaks.
-        if ammo != .homing, Double.random(in: 0...1) < difficulty.heartChance, let h = enemy.heartLookalikes.randomElement() { best = h }
         let heading = battle.arena.heading(from: side, to: foe)
-        let sol = solve(arena: battle.arena, side: side, heading: heading, target: best, wind: w, gravity: battle.rules.gravity) ?? (yaw: 0, v: 32)
+        let gold = battle.goldTarget()
+        func aimAt(_ t: Vec3) -> (yaw: Double, v: Double)? { solve(arena: battle.arena, side: side, heading: heading, target: t, wind: w, gravity: battle.rules.gravity) }
+        /// Where a noiseless shot at `t` would first touch, and what that is worth.
+        func score(_ t: Vec3) -> (Double, (yaw: Double, v: Double))? {
+            guard let sol = aimAt(t) else { return nil }
+            let m = Ballistics.muzzle(battle.arena, side: side, heading: heading, yaw: sol.yaw)
+            let v0 = Vec3(x: m.d.x * sol.v, y: m.d.y * sol.v, z: m.d.z * sol.v)
+            let tr = battle.trace(p0: m.p0, v0: v0, wind: w, homeTo: ammo == .homing ? gold : nil)
+            var s = 0.0
+            if tr.kind == .castle, tr.side == foe, let b = tr.brick {
+                let k = enemy.decoys.firstIndex(of: b)
+                s = worth(enemy, brick: b, revealed: k.map { enemy.decoyRevealed[$0] } ?? false)
+                if let g = gold {
+                    let dx = tr.pos.x - g.x, dy = tr.pos.y - g.y, dz = tr.pos.z - g.z
+                    if dx * dx + dy * dy + dz * dz <= K.critRange * K.critRange { s *= 1.3; s += enemy.total * 0.03 }
+                }
+            } else if tr.kind == .ground, enemy.distance(to: tr.pos) < 3 {
+                s = 0.2
+            }
+            return (s, sol)
+        }
+        let standing = enemy.bricks.indices.filter { !enemy.bricks[$0].shape.isDecal && enemy.isHome($0) }
+        var best: (Double, (yaw: Double, v: Double))?
+        if !standing.isEmpty {
+            // Front-facing, higher bricks first: those are the ones a ball can reach.
+            let picks = (0..<difficulty.samples).map { _ in standing.randomElement()! }
+            for i in picks {
+                if let s = score(enemy.center(i)), s.0 > (best?.0 ?? -1) { best = s }
+            }
+        }
+        if ammo == .homing || Double.random(in: 0...1) < difficulty.goldChance, let g = gold,
+           let s = score(g), ammo == .homing || s.0 > (best?.0 ?? -1) { best = s }
+        // Going straight for the heart, when it can see one. It cannot tell a decoy from the heart until one breaks.
+        // Once the walls are mostly down there is little left to topple but the heart.
+        let heartChance = enemy.pct < 0.35 ? max(0.5, difficulty.heartChance) : difficulty.heartChance
+        if ammo != .homing, Double.random(in: 0...1) < heartChance {
+            for h in enemy.heartLookalikes.shuffled() {
+                if let s = score(h), s.0 > enemy.total * 0.4 { best = s; break }
+            }
+        }
+        let sol = best?.1 ?? aimAt(battle.arena.castleCenter(foe)) ?? (yaw: 0, v: 32)
         let v = sol.v * (1 + gauss() * difficulty.speedNoise)
         let yaw = sol.yaw + gauss() * difficulty.yawNoise
         let aim = Aim(yaw: min(max(yaw, -K.maxYaw), K.maxYaw), power: min(max((v - K.vMin) / (K.vMax - K.vMin) * 100, 0), 100), target: foe)
@@ -1327,23 +969,23 @@ enum Challenge {
 /// A ladder of computer opponents: each stage has its own castle, skill and twist.
 struct Stage: Identifiable {
     let id: Int
-    let design: CastleDesign
+    let design: BrickDesign
     let difficulty: Difficulty
     let modifier: Modifier
 
     static let all: [Stage] = [
-        Stage(id: 1, design: Presets.outpost, difficulty: .kolay, modifier: .calm),
-        Stage(id: 2, design: Presets.longWall, difficulty: .kolay, modifier: .none),
-        Stage(id: 3, design: .classic, difficulty: .kolay, modifier: .none),
-        Stage(id: 4, design: Presets.outpost, difficulty: .orta, modifier: .storm),
-        Stage(id: 5, design: Presets.spires, difficulty: .orta, modifier: .none),
-        Stage(id: 6, design: Presets.citadel, difficulty: .orta, modifier: .megaRush),
-        Stage(id: 7, design: Presets.bulwark, difficulty: .orta, modifier: .none),
-        Stage(id: 8, design: Presets.twinWalls, difficulty: .orta, modifier: .lowGravity),
-        Stage(id: 9, design: Presets.spires, difficulty: .zor, modifier: .storm),
-        Stage(id: 10, design: Presets.citadel, difficulty: .zor, modifier: .bigBlast),
-        Stage(id: 11, design: Presets.twinWalls, difficulty: .zor, modifier: .none),
-        Stage(id: 12, design: Presets.stronghold, difficulty: .zor, modifier: .megaRush),
+        Stage(id: 1, design: Presets.stages[0], difficulty: .kolay, modifier: .calm),
+        Stage(id: 2, design: Presets.stages[1], difficulty: .kolay, modifier: .none),
+        Stage(id: 3, design: Presets.stages[2], difficulty: .kolay, modifier: .none),
+        Stage(id: 4, design: Presets.stages[3], difficulty: .orta, modifier: .storm),
+        Stage(id: 5, design: Presets.stages[4], difficulty: .orta, modifier: .none),
+        Stage(id: 6, design: Presets.stages[5], difficulty: .orta, modifier: .megaRush),
+        Stage(id: 7, design: Presets.stages[6], difficulty: .orta, modifier: .none),
+        Stage(id: 8, design: Presets.stages[7], difficulty: .orta, modifier: .lowGravity),
+        Stage(id: 9, design: Presets.stages[8], difficulty: .zor, modifier: .storm),
+        Stage(id: 10, design: Presets.stages[9], difficulty: .zor, modifier: .bigBlast),
+        Stage(id: 11, design: Presets.stages[10], difficulty: .zor, modifier: .none),
+        Stage(id: 12, design: Presets.stages[11], difficulty: .zor, modifier: .megaRush),
     ]
 
     /// Stars for a win, by how much of your own castle is still standing.
@@ -1354,10 +996,11 @@ struct Stage: Identifiable {
 
 /// Castle after castle until yours falls. Damage carries over; a win patches some of it up.
 enum Gauntlet {
-    static let repairCells = 420
+    /// Share of the castle's mass a won round puts back.
+    static let repairShare = 0.4
 
     struct Foe {
-        let design: CastleDesign
+        let design: BrickDesign
         let difficulty: Difficulty
         let modifier: Modifier
     }
@@ -1378,18 +1021,15 @@ enum Gauntlet {
 // MARK: - Castle codes
 
 /// A castle as a short text code that can be sent to a friend and pasted back into the game.
+/// Version 2 (`KS2-`) lists every brick; version 1 (`KS-`) codes from before bricks still read,
+/// rebuilt from stamps.
 enum CastleCode {
-    static let prefix = "KS-"
+    static let prefix = "KS2-"
+    static let legacyPrefix = "KS-"
     private static let alphabet = Array("0123456789ABCDEFGHJKMNPQRSTVWXYZ")
 
-    static func encode(_ d: CastleDesign) -> String {
-        var bits: [Bool] = []
-        func put(_ v: Int, _ n: Int) { for i in stride(from: n - 1, through: 0, by: -1) { bits.append((v >> i) & 1 == 1) } }
-        put(1, 4)
-        put(d.heart.rawValue, 4)
-        put(d.pieces.count, 8)
-        for p in d.pieces { put(p.kind.rawValue, 4); put(p.tx, 4); put(p.tz, 4) }
-        put(checksum(d), 8)
+    private static func text(_ bits: [Bool], prefix: String) -> String {
+        var bits = bits
         while bits.count % 5 != 0 { bits.append(false) }
         var out = prefix
         for i in stride(from: 0, to: bits.count, by: 5) {
@@ -1400,8 +1040,7 @@ enum CastleCode {
         return out
     }
 
-    /// Finds a castle code anywhere in a piece of text. Returns nil unless it is a playable castle.
-    static func decode(_ text: String) -> CastleDesign? {
+    private static func bits(_ text: String, after prefix: String) -> [Bool]? {
         let up = text.uppercased()
         guard let start = up.range(of: prefix) else { return nil }
         var bits: [Bool] = []
@@ -1410,6 +1049,75 @@ enum CastleCode {
             guard let v = alphabet.firstIndex(of: c) else { break }
             for i in stride(from: 4, through: 0, by: -1) { bits.append((v >> i) & 1 == 1) }
         }
+        return bits
+    }
+
+    static func encode(_ d: BrickDesign) -> String {
+        var bits: [Bool] = []
+        func put(_ v: Int, _ n: Int) { for i in stride(from: n - 1, through: 0, by: -1) { bits.append((v >> i) & 1 == 1) } }
+        put(2, 4)
+        put(d.heart.rawValue, 4)
+        put(d.bricks.count, 9)
+        for b in d.bricks { put(b.shape.rawValue, 4); put(b.material.rawValue, 3); put(b.x, 5); put(b.y, 5); put(b.z, 5); put(b.rot, 2) }
+        put(checksum(d), 12)
+        return text(bits, prefix: prefix)
+    }
+
+    /// Finds a castle code anywhere in a piece of text. Returns nil unless it is a playable castle.
+    static func decode(_ text: String) -> BrickDesign? {
+        guard let bits = bits(text, after: prefix) else { return decodeTest(text) ?? decodeLegacy(text).map(BrickDesign.init(legacy:)) }
+        var at = 0
+        func take(_ n: Int) -> Int? {
+            guard at + n <= bits.count else { return nil }
+            var v = 0
+            for b in bits[at..<at + n] { v = v * 2 + (b ? 1 : 0) }
+            at += n
+            return v
+        }
+        guard take(4) == 2, let h = take(4), let heart = HeartKind(rawValue: h), let n = take(9), n <= BK.maxBricks else { return nil }
+        var d = BrickDesign(heart: heart)
+        for _ in 0..<n {
+            guard let s = take(4), let shape = BrickShape(rawValue: s), let m = take(3), let material = BrickMaterial(rawValue: m),
+                  let x = take(5), let y = take(5), let z = take(5), let rot = take(2) else { return nil }
+            d.bricks.append(PlacedBrick(shape: shape, material: material, x: x, y: y, z: z, rot: rot))
+        }
+        guard take(12) == checksum(d), d.problem == nil else { return nil }
+        return d
+    }
+
+    private static func checksum(_ d: BrickDesign) -> Int {
+        var h = 17 &* 31 &+ d.heart.rawValue
+        for b in d.bricks {
+            h = h &* 31 &+ b.shape.rawValue &* 7 &+ b.material.rawValue
+            h = h &* 31 &+ ((b.x * 32 + b.y) * 32 + b.z) * 4 + b.rot
+        }
+        return ((h % 4096) + 4096) % 4096
+    }
+
+    /// A brick code from a 2.0 test build (24 bits a brick, 8-bit checksum).
+    private static func decodeTest(_ text: String) -> BrickDesign? {
+        guard let bits = bits(text, after: "KSB-") else { return nil }
+        var at = 0
+        func take(_ n: Int) -> Int? {
+            guard at + n <= bits.count else { return nil }
+            var v = 0
+            for b in bits[at..<at + n] { v = v * 2 + (b ? 1 : 0) }
+            at += n
+            return v
+        }
+        guard take(4) == 2, let h = take(4), let n = take(9), n <= BK.maxBricks else { return nil }
+        var flat = [2, h]
+        for _ in 0..<n {
+            guard let s = take(4), let m = take(3), let x = take(5), let y = take(5), let z = take(5), let r = take(2) else { return nil }
+            flat += [s, m, x, y, z, r]
+        }
+        guard take(8) == flat.reduce(17, { ($0 * 31 + $1) & 0xff }), let d = BrickDesign(encoded: flat), d.problem == nil else { return nil }
+        return d
+    }
+
+    /// A version 1 code: the tile castle it describes.
+    private static func decodeLegacy(_ text: String) -> CastleDesign? {
+        guard let bits = bits(text, after: legacyPrefix) else { return nil }
         var at = 0
         func take(_ n: Int) -> Int? {
             guard at + n <= bits.count else { return nil }
@@ -1425,11 +1133,11 @@ enum CastleCode {
             guard let k = take(4), let kind = PieceKind(rawValue: k), let tx = take(4), let tz = take(4) else { return nil }
             d.pieces.append(Piece(kind: kind, tx: tx, tz: tz))
         }
-        guard take(8) == checksum(d), d.problem == nil else { return nil }
+        guard take(8) == legacyChecksum(d), d.problem == nil else { return nil }
         return d
     }
 
-    private static func checksum(_ d: CastleDesign) -> Int {
+    private static func legacyChecksum(_ d: CastleDesign) -> Int {
         var h = 17 &* 31 &+ d.heart.rawValue
         for p in d.pieces { h = h &* 31 &+ p.kind.rawValue &* 225 &+ p.tx &* 15 &+ p.tz }
         return ((h % 256) + 256) % 256

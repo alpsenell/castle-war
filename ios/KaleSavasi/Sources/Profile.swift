@@ -269,10 +269,6 @@ struct Profile: Codable, Equatable {
         return BrickDesign(legacy: CastleDesign.migrating(encoded: design) ?? .classic)
     }
 
-    /// Temporary bridge for match code that still plays tile castles: the tile castle of an old
-    /// save, otherwise the classic one. Remove once matches read `castle`.
-    var legacyCastle: CastleDesign { CastleDesign.migrating(encoded: design) ?? .classic }
-
     /// Reads a saved brick castle without judging it, so a castle saved under older limits still opens.
     private static func savedBricks(_ e: [Int]) -> BrickDesign? {
         guard e.count >= 2, e[0] == BrickDesign.format, (e.count - 2) % 6 == 0, let h = HeartKind(rawValue: e[1]) else { return nil }

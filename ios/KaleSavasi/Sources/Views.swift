@@ -25,6 +25,9 @@ struct SceneContainer: UIViewRepresentable {
         v.rendersContinuously = true
         v.isPlaying = true
         v.backgroundColor = UIColor(hex: 0x8fd0ff)
+        #if DEBUG
+        v.showsStatistics = ProcessInfo.processInfo.arguments.contains("-stats")
+        #endif
         return v
     }
     func updateUIView(_ uiView: SCNView, context: Context) {}

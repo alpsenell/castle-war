@@ -2,7 +2,7 @@ import AVFoundation
 
 /// Short synthesized sound effects; nothing is loaded from disk.
 final class Sfx {
-    enum Sound: CaseIterable { case fire, hit, thud, splash, win, lose, tick, crit, charged }
+    enum Sound: CaseIterable { case fire, hit, thud, splash, win, lose, tick, crit, charged, woodBreak, stoneBreak, iceBreak, ironClang }
 
     var enabled = true
     private let engine = AVAudioEngine()
@@ -15,7 +15,7 @@ final class Sfx {
     init() {
         try? AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
         try? AVAudioSession.sharedInstance().setActive(true)
-        for _ in 0..<5 {
+        for _ in 0..<8 {
             let p = AVAudioPlayerNode()
             engine.attach(p)
             engine.connect(p, to: engine.mainMixerNode, format: format)
@@ -85,6 +85,29 @@ final class Sfx {
         case .tick: return mix(0.05, [sweep(0.04, 1200, 900, 0.12)])
         case .crit: return mix(0.5, [sweep(0.16, 880, 880, 0.22, triangle: true), sweep(0.3, 1320, 1320, 0.22, delay: 0.1, triangle: true)])
         case .charged: return mix(0.45, [sweep(0.4, 220, 880, 0.2, triangle: true)])
+        case .woodBreak: return mix(0.45, [crackle(0.35, 2600, 0.7, grains: 7), noise(0.3, 1400, 260, 0.35), sweep(0.18, 210, 120, 0.3)])
+        case .stoneBreak: return mix(0.6, [crackle(0.5, 1200, 0.55, grains: 14), noise(0.55, 900, 90, 0.55), sweep(0.3, 70, 38, 0.45)])
+        case .iceBreak: return mix(0.6, [crackle(0.45, 6500, 0.45, grains: 18), chime(0.5, [2350, 3170, 4430, 5210], 0.12), noise(0.25, 5000, 2500, 0.2, highpass: true)])
+        case .ironClang: return mix(0.7, [chime(0.65, [440, 1187, 1693, 2531], 0.16), noise(0.12, 3000, 800, 0.25)])
         }
+    }
+
+    /// A burst of short clicks spread over the start of the sound: wood splitting, stone crumbling, ice cracking.
+    private func crackle(_ dur: Double, _ tone: Double, _ gain: Double, grains: Int) -> (Double) -> Double {
+        var starts: [Double] = []
+        for i in 0..<grains { starts.append(Double(i) / Double(grains) * dur * 0.55 + Double.random(in: 0...0.02)) }
+        var lp = 0.0
+        let a = 1 - exp(-2 * Double.pi * tone / rate)
+        return { t in
+            var x = 0.0
+            for s in starts where t >= s && t < s + 0.012 { x += Double.random(in: -1...1) * exp(-(t - s) * 300) }
+            lp += a * (x - lp)
+            return (x - lp * 0.6) * gain * exp(-t * 4 / dur)
+        }
+    }
+
+    /// Bell-like partials with a quick fade: ice ringing, iron struck.
+    private func chime(_ dur: Double, _ freqs: [Double], _ gain: Double) -> (Double) -> Double {
+        { t in freqs.enumerated().reduce(0) { $0 + sin(2 * Double.pi * $1.element * t) * exp(-t * (5 + Double($1.offset) * 3) / dur) } * gain }
     }
 }

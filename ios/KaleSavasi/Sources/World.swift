@@ -108,287 +108,87 @@ enum Look {
         return m
     }
 
-    /// Dark stone with iron bands, for walls that take two blasts.
-    static func ironMaterial(cracked: Bool) -> SCNMaterial {
-        let m = stoneMaterial(cracked ? 0x3d4146 : 0x5d646b)
-        m.metalness.contents = cracked ? 0.1 : 0.35
-        m.roughness.contents = cracked ? 0.95 : 0.7
-        return m
-    }
-
     static let moatWater: SCNMaterial = {
         let m = Look.solid(0x1f5a7d, roughness: 0.08, metal: 0.55)
         m.normal.contents = Textures.waterNormal
         m.normal.intensity = 0.5
         return m
     }()
-
-    /// A castle's mesh materials: three stone shades, team colour, trim, heart (decoys use it too),
-    /// iron, cracked iron, and the dull crystal of a decoy that has been found out.
-    static func castleMaterials(_ side: Int, heart: HeartKind = .crystal) -> [SCNMaterial] {
-        stone[side].map(stoneMaterial) + [stoneMaterial(accent[side]), stoneMaterial(trim[side]), heartMaterial(heart),
-                                          ironMaterial(cracked: false), ironMaterial(cracked: true), solid(0x77707c, roughness: 0.55)]
-    }
 }
 
-/// Collects boxes into one geometry with an element per material. Texture coordinates follow
-/// world position, so the stone runs unbroken from block to block.
-struct MeshBuilder {
-    private var pos: [SCNVector3] = []
-    private var nor: [SCNVector3] = []
-    private var uv: [CGPoint] = []
-    private var tan: [SIMD4<Float>] = []
-    private var idx: [[Int32]]
-
-    init(materials: Int) { idx = Array(repeating: [], count: materials) }
-
-    /// A box whose edges and corners are cut at 45°. Each bevel takes its normals from the two faces
-    /// it joins, so the light rolls over it like a worn, rounded stone.
-    mutating func addBox(center c: SIMD3<Float>, size: SIMD3<Float>, material: Int, bevel: Float = 0, texel: Float = 0.3) {
-        let h = size / 2
-        let b = min(bevel, min(h.x, min(h.y, h.z)) * 0.45)
-        let e = h - b
-        // normal, tangent u, bitangent v with u × v = normal
-        let faces: [(SIMD3<Float>, SIMD3<Float>, SIMD3<Float>)] = [
-            (SIMD3(1, 0, 0), SIMD3(0, 1, 0), SIMD3(0, 0, 1)), (SIMD3(-1, 0, 0), SIMD3(0, 0, 1), SIMD3(0, 1, 0)),
-            (SIMD3(0, 1, 0), SIMD3(0, 0, 1), SIMD3(1, 0, 0)), (SIMD3(0, -1, 0), SIMD3(1, 0, 0), SIMD3(0, 0, 1)),
-            (SIMD3(0, 0, 1), SIMD3(1, 0, 0), SIMD3(0, 1, 0)), (SIMD3(0, 0, -1), SIMD3(0, 1, 0), SIMD3(1, 0, 0)),
-        ]
-        func key(_ f: Int, _ s: SIMD3<Float>) -> Int { f * 8 + (s.x > 0 ? 1 : 0) + (s.y > 0 ? 2 : 0) + (s.z > 0 ? 4 : 0) }
-        func faceOf(_ n: SIMD3<Float>) -> Int { n.x != 0 ? (n.x > 0 ? 0 : 1) : n.y != 0 ? (n.y > 0 ? 2 : 3) : (n.z > 0 ? 4 : 5) }
-        var vid: [Int: Int32] = [:]
-        var at: [Int32: SIMD3<Float>] = [:]
-        for (f, (n, u, v)) in faces.enumerated() {
-            for s in [n - u - v, n + u - v, n + u + v, n - u + v] {
-                let p = c + s * e + n * b
-                let i = Int32(pos.count)
-                pos.append(SCNVector3(p.x, p.y, p.z))
-                nor.append(SCNVector3(n.x, n.y, n.z))
-                uv.append(CGPoint(x: CGFloat(simd_dot(p, u) * texel), y: CGFloat(simd_dot(p, v) * texel)))
-                tan.append(SIMD4(u.x, u.y, u.z, 1))
-                vid[key(f, s)] = i
-                at[i] = p
-            }
-        }
-        func tri(_ a: Int32, _ b: Int32, _ d: Int32) {
-            guard let pa = at[a], let pb = at[b], let pd = at[d] else { return }
-            let out = simd_dot(simd_cross(pb - pa, pd - pa), (pa + pb + pd) / 3 - c)
-            idx[material].append(contentsOf: out >= 0 ? [a, b, d] : [a, d, b])
-        }
-        for (f, (n, u, v)) in faces.enumerated() {
-            let q = [n - u - v, n + u - v, n + u + v, n - u + v].map { vid[key(f, $0)]! }
-            tri(q[0], q[1], q[2]); tri(q[0], q[2], q[3])
-        }
-        guard b > 0 else { return }
-        for i in 0..<6 { for j in (i + 1)..<6 {
-            let na = faces[i].0, nb = faces[j].0
-            if simd_dot(na, nb) != 0 { continue }
-            let t = simd_cross(na, nb)
-            let a1 = vid[key(i, na + nb + t)]!, a2 = vid[key(i, na + nb - t)]!
-            let b1 = vid[key(j, na + nb + t)]!, b2 = vid[key(j, na + nb - t)]!
-            tri(a1, a2, b2); tri(a1, b2, b1)
-        } }
-        for sx in [Float(-1), 1] { for sy in [Float(-1), 1] { for sz in [Float(-1), 1] {
-            let s = SIMD3(sx, sy, sz)
-            tri(vid[key(faceOf(SIMD3(sx, 0, 0)), s)]!, vid[key(faceOf(SIMD3(0, sy, 0)), s)]!, vid[key(faceOf(SIMD3(0, 0, sz)), s)]!)
-        } } }
-    }
-
-    func geometry(materials: [SCNMaterial]) -> SCNGeometry {
-        var elements: [SCNGeometryElement] = [], mats: [SCNMaterial] = []
-        for (i, list) in idx.enumerated() where !list.isEmpty {
-            elements.append(SCNGeometryElement(indices: list, primitiveType: .triangles))
-            mats.append(materials[i])
-        }
-        let tanData = tan.withUnsafeBufferPointer { Data(buffer: $0) }
-        let tangents = SCNGeometrySource(data: tanData, semantic: .tangent, vectorCount: tan.count, usesFloatComponents: true,
-                                         componentsPerVector: 4, bytesPerComponent: 4, dataOffset: 0, dataStride: MemoryLayout<SIMD4<Float>>.stride)
-        let g = SCNGeometry(sources: [SCNGeometrySource(vertices: pos), SCNGeometrySource(normals: nor), SCNGeometrySource(textureCoordinates: uv), tangents], elements: elements)
-        g.materials = mats
-        return g
-    }
+/// Collision groups of everything that has a body.
+enum Phys {
+    static let ground = 1, brick = 4, ball = 8, chip = 16
 }
 
-private enum Phys {
-    static let fixed = 1, loose = 2
-    private static var shapes: [Int: SCNPhysicsShape] = [:]
-    static func blockShape(_ len: Int) -> SCNPhysicsShape {
-        if let s = shapes[len] { return s }
-        let s = SCNPhysicsShape(geometry: SCNBox(width: CGFloat(len) - 0.08, height: CGFloat(K.lh) - 0.08, length: 0.92, chamferRadius: 0), options: nil)
-        shapes[len] = s
-        return s
-    }
-}
+/// One brick in the match scene. The physics world reads and writes its state.
+final class BrickNode: SCNNode {
+    let castle: Int
+    let index: Int
+    let brick: PlacedBrick
+    var hp: Int
+    let maxHp: Int
+    /// Collision impulse that takes one hit point off; written on the main thread, read by contacts.
+    var threshold: Float = 1
+    /// The brick has a dynamic body: it is part of the shot being played.
+    var awake = false
+    var lastHit = -1.0
 
-final class CastleView {
-    let castle: Castle
-    let meshNode = SCNNode()
-    let root = SCNNode()
-    private let materials: [SCNMaterial]
-    private var colorOf: [Int]
-    private var fixedBodies: [Int: SCNNode] = [:]
-    fileprivate var decor: [(node: SCNNode, ids: [Int], alive: Bool)] = []
-    private var looseGeo: [Int: SCNGeometry] = [:]
-    private let physics: Bool
-    /// The mortar joint: each block is drawn this much smaller so a seam shows between stones.
-    private let joint: Float = 0.03
-    /// How far each stone's edges are rounded off.
-    private let bevel: Float = 0.11
-    /// The floating gems above the heart (decoy nil) and each decoy, until they break.
-    private var gems: [(node: SCNNode, decoy: Int?)] = []
-
-    /// `physics` is off for the builder preview, where nothing ever falls.
-    init(castle: Castle, physics: Bool = true) {
+    init(castle: Int, index: Int, brick: PlacedBrick, hp: Int, maxHp: Int) {
         self.castle = castle
-        self.physics = physics
-        materials = Look.castleMaterials(castle.side, heart: castle.heartKind)
-        var rnd = Mulberry32(UInt32(castle.side * 977 + 13))
-        colorOf = castle.blocks.map { b in
-            if b.mat == 2 { return 3 }
-            if b.mat == 3 { return 4 }
-            if b.mat == 4 || b.mat == 6 { return 5 }
-            if b.mat == 5 { return 6 }
-            let r = rnd.next()
-            return r < 0.5 ? 0 : r < 0.8 ? 1 : 2
+        self.index = index
+        self.brick = brick
+        self.hp = hp
+        self.maxHp = maxHp
+        super.init()
+    }
+    required init?(coder: NSCoder) { fatalError() }
+}
+
+/// A castle's bricks in the scene, each its own node, placed through the castle's frame.
+final class CastleBricks {
+    let side: Int
+    let design: BrickDesign
+    let frame: CastleFrame
+    let root = SCNNode()
+    /// Every brick, nil once broken.
+    var nodes: [BrickNode?] = []
+    /// The castle as built, castle-local.
+    let home: CastleSnapshot
+    /// Floating gems over the heart and each decoy not yet found out, with the brick each hangs over.
+    var gems: [(anchor: SCNNode, brick: Int)] = []
+    /// Bricks of this castle the shot being played has given away: the heart, decoys.
+    var lostCrystals = Set<Int>()
+    /// One static copy of every brick, drawn instead of the bricks while nothing moves.
+    var flat: SCNNode?
+    let rotation: simd_quatf
+    let origin: SIMD3<Float>
+
+    init(side: Int, design: BrickDesign, frame: CastleFrame) {
+        self.side = side
+        self.design = design
+        self.frame = frame
+        home = CastleSnapshot(design: design)
+        rotation = simd_quatf(angle: Float(frame.yaw), axis: SIMD3(0, 1, 0))
+        origin = frame.corner.f
+    }
+
+    func world(_ p: SIMD3<Float>) -> SIMD3<Float> { origin + rotation.act(p) }
+    func local(_ p: SIMD3<Float>) -> SIMD3<Float> { rotation.inverse.act(p - origin) }
+    func worldPose(_ pose: BrickPose) -> (p: SIMD3<Float>, q: simd_quatf) {
+        (world(pose.p), rotation * simd_quatf(vector: pose.q))
+    }
+
+    /// Where every brick is now, castle-local.
+    var snapshot: CastleSnapshot {
+        var out = home
+        for i in out.poses.indices {
+            guard let n = nodes[i] else { out.poses[i].hp = 0; continue }
+            let t = n.awake ? n.presentation : n
+            let q = rotation.inverse * t.simdWorldOrientation
+            out.poses[i] = BrickPose(p: local(t.simdWorldPosition), q: q.vector, hp: Int8(n.hp))
         }
-        root.addChildNode(meshNode)
-        if physics { for b in castle.blocks where b.alive { addFixedBody(b) } }
-        let slate = Look.roofMaterial(Look.accent[castle.side])
-        for d in castle.decor {
-            let n = SCNNode()
-            let roof = SCNNode(geometry: SCNPyramid(width: CGFloat(d.w * 2), height: CGFloat(d.ht), length: CGFloat(d.d * 2)))
-            roof.geometry?.materials = [slate]
-            n.addChildNode(roof)
-            if d.flag {
-                let pole = SCNNode(geometry: SCNCylinder(radius: 0.09, height: 3.4))
-                pole.geometry?.materials = [Look.solid(0x3a3d40, roughness: 0.4, metal: 1)]
-                pole.position = SCNVector3(0, Float(d.ht) + 1.3, 0)
-                n.addChildNode(pole)
-                let cloth = SCNNode(geometry: SCNBox(width: 2.2, height: 1.3, length: 0.05, chamferRadius: 0))
-                cloth.geometry?.materials = [Look.solid(Look.accent[castle.side], roughness: 0.9)]
-                cloth.position = SCNVector3(Float(castle.fx) * 1.15, Float(d.ht) + 2.3, Float(castle.fz) * 1.15)
-                if !castle.alongWorldX { cloth.eulerAngles.y = .pi / 2 }
-                n.addChildNode(cloth)
-            }
-            n.simdPosition = castle.worldPoint(gx: d.x, gy: d.y, gz: d.z).f
-            root.addChildNode(n)
-            var ids: [Int] = []
-            for c in d.cells {
-                let id = castle.cellBlock[cellIndex(c[0], c[1], c[2])]
-                if id >= 0 && castle.blocks[id].alive && !ids.contains(id) { ids.append(id) }
-            }
-            decor.append((n, ids, true))
-        }
-        if let c = castle.heartCenter { addGem(at: c, decoy: nil) }
-        for i in castle.decoyRevealed.indices where !castle.decoyRevealed[i] { if let c = castle.decoyCenter(i) { addGem(at: c, decoy: i) } }
-        for m in castle.moats {
-            let water = SCNNode(geometry: SCNPlane(width: 2, height: 2))
-            water.geometry?.materials = [Look.moatWater]
-            water.eulerAngles.x = -.pi / 2
-            water.simdPosition = castle.worldPoint(gx: Double(m.x) + 1, gy: 0.06 / K.lh, gz: Double(m.z) + 1).f
-            water.castsShadow = false
-            root.addChildNode(water)
-        }
-        rebuildMesh()
-    }
-
-    private func addGem(at c: Vec3, decoy: Int?) {
-        let n = SCNNode()
-        n.simdPosition = c.f + SIMD3(0, 2.6, 0)
-        let crystal = Look.heartMaterial(castle.heartKind)
-        for flip in [false, true] {
-            let half = SCNNode(geometry: SCNPyramid(width: 1.1, height: 1.0, length: 1.1))
-            half.geometry?.materials = [crystal]
-            if flip { half.eulerAngles.x = .pi }
-            n.addChildNode(half)
-        }
-        let light = SCNLight()
-        light.type = .omni
-        light.color = UIColor(hex: Look.heartColors(castle.heartKind).glow)
-        light.intensity = 900
-        light.attenuationStartDistance = 1
-        light.attenuationEndDistance = 9
-        n.light = light
-        n.runAction(.repeatForever(.rotateBy(x: 0, y: .pi * 2, z: 0, duration: 4)))
-        n.runAction(.repeatForever(.sequence([.moveBy(x: 0, y: 0.4, z: 0, duration: 1.1), .moveBy(x: 0, y: -0.4, z: 0, duration: 1.1)])))
-        root.addChildNode(n)
-        gems.append((n, decoy))
-    }
-
-    /// Takes down the gem of the heart (decoy nil) or of a decoy. Returns where it was.
-    fileprivate func breakGem(decoy: Int?) -> SIMD3<Float>? {
-        guard let i = gems.firstIndex(where: { $0.decoy == decoy }) else { return nil }
-        let n = gems.remove(at: i).node
-        let p = n.presentation.simdWorldPosition
-        n.removeFromParentNode()
-        return p
-    }
-
-    /// The material a block shows right now: cracked iron and found-out decoys change.
-    fileprivate func look(_ b: Block) -> Int {
-        if b.mat == 5 && b.hp < 2 { return 7 }
-        if b.mat == 6, let d = castle.decoyOf[b.id], castle.decoyRevealed[d] { return 8 }
-        return colorOf[b.id]
-    }
-
-    private func addFixedBody(_ b: Block) {
-        let n = SCNNode()
-        n.simdPosition = castle.center(of: b).f
-        if !runsAlongX(b) { n.eulerAngles.y = .pi / 2 }
-        let body = SCNPhysicsBody(type: .static, shape: Phys.blockShape(b.len))
-        body.categoryBitMask = Phys.fixed
-        body.collisionBitMask = Phys.loose
-        n.physicsBody = body
-        root.addChildNode(n)
-        fixedBodies[b.id] = n
-    }
-
-    func rebuildMesh() {
-        var mb = MeshBuilder(materials: materials.count)
-        for b in castle.blocks where b.alive {
-            let c = castle.center(of: b).f
-            let size: SIMD3<Float> = runsAlongX(b) ? SIMD3(Float(b.len), Float(K.lh), 1) : SIMD3(1, Float(K.lh), Float(b.len))
-            mb.addBox(center: c, size: size - SIMD3(repeating: joint), material: look(b), bevel: bevel)
-        }
-        meshNode.geometry = mb.geometry(materials: materials)
-    }
-
-    /// Turns a block that just died into a loose physics body.
-    fileprivate func release(_ id: Int) -> SCNNode {
-        let b = castle.blocks[id]
-        let old = fixedBodies.removeValue(forKey: id)
-        old?.removeFromParentNode()
-        let key = b.len * 10 + look(b)
-        let geo: SCNGeometry
-        if let g = looseGeo[key] { geo = g } else {
-            let g = SCNBox(width: CGFloat(b.len) - 0.06, height: CGFloat(K.lh) - 0.06, length: 0.94, chamferRadius: CGFloat(bevel))
-            g.chamferSegmentCount = 3
-            g.materials = [materials[look(b)]]
-            looseGeo[key] = g
-            geo = g
-        }
-        let n = SCNNode(geometry: geo)
-        n.simdPosition = castle.center(of: b).f
-        if !runsAlongX(b) { n.eulerAngles.y = .pi / 2 }
-        let body = SCNPhysicsBody(type: .dynamic, shape: Phys.blockShape(b.len))
-        body.mass = CGFloat(b.len)
-        body.friction = 0.8
-        body.restitution = 0.12
-        body.angularDamping = 0.3
-        body.categoryBitMask = Phys.loose
-        body.collisionBitMask = Phys.fixed | Phys.loose
-        n.physicsBody = body
-        return n
-    }
-
-    /// Whether a block's length lies along the world x axis; castles on the north and south seats are turned a quarter.
-    private func runsAlongX(_ b: Block) -> Bool { (b.dir == 1) == castle.alongWorldX }
-
-    /// Stands rebuilt blocks back up. Returns where they are, for the effect.
-    fileprivate func restore(_ ids: [Int]) -> [SIMD3<Float>] {
-        if physics { for id in ids where fixedBodies[id] == nil { addFixedBody(castle.blocks[id]) } }
-        rebuildMesh()
-        return ids.map { castle.center(of: castle.blocks[$0]).f }
+        return out
     }
 }
 
@@ -474,14 +274,16 @@ final class World {
     let scene = SCNScene()
     let cameraNode = SCNNode()
     let camera = SCNCamera()
-    private(set) var castleViews: [CastleView] = []
+    var castleViews: [CastleBricks] = []
     private(set) var cannons: [CannonView] = []
     let ball = SCNNode(geometry: SCNSphere(radius: CGFloat(K.ballR)))
     private var dots: [SCNNode] = []
     private let targetNode = World.makeTargetNode()
-    private let looseRoot = SCNNode()
-    private var loose: [(node: SCNNode, born: TimeInterval, decor: Bool)] = []
-    private var rubble: [SCNNode] = []
+    /// Fragments of broken bricks, dust and spent cannonballs live under here.
+    let looseRoot = SCNNode()
+    /// The physics side of a shot: see Physics.swift.
+    var play = ShotPlay()
+    let contacts = ContactSink()
     private var pickupNode: SCNNode?
     private var pickupShown: Pickup?
     private var domes: [SCNNode] = []
@@ -489,9 +291,15 @@ final class World {
     private var riverNodes: [SCNNode] = []
     private var lakeNodes: [SCNNode] = []
     private var earth: [SCNNode] = []
-    private var clock: TimeInterval = 0
-    private var sweep: TimeInterval = 0
+    var clock: TimeInterval = 0
+    /// Render category of nodes the camera does not draw: bricks while their castle is shown flattened.
+    static let unseen = 2
+    private var lockDepth = 0
     var onSplash: (() -> Void)?
+    /// A brick broke (its material), a ball struck something (how hard), a heart or decoy was lost (castle, brick).
+    var onBreak: ((BrickMaterial) -> Void)?
+    var onKnock: ((Float) -> Void)?
+    var onCrystalLost: ((Int, Int) -> Void)?
 
     init() {
         buildSky()
@@ -529,12 +337,14 @@ final class World {
         camera.vignettingIntensity = 0.3
         camera.saturation = 1.08
         camera.contrast = 0.06
+        camera.categoryBitMask = ~World.unseen
         cameraNode.camera = camera
         cameraNode.simdPosition = SIMD3(90, 40, 90)
         scene.rootNode.addChildNode(cameraNode)
         scene.rootNode.addChildNode(looseRoot)
         scene.rootNode.addChildNode(targetNode)
-        scene.physicsWorld.gravity = SCNVector3(0, -22, 0)
+        scene.physicsWorld.gravity = SCNVector3(0, -K.brickGravity, 0)
+        scene.physicsWorld.contactDelegate = contacts
     }
 
     // MARK: Sky and light
@@ -672,8 +482,8 @@ final class World {
         let ground = SCNNode()
         ground.position = SCNVector3(0, -2, 0)
         let body = SCNPhysicsBody(type: .static, shape: SCNPhysicsShape(geometry: SCNBox(width: 1400, height: 4, length: 1000, chamferRadius: 0), options: nil))
-        body.categoryBitMask = Phys.fixed
-        body.collisionBitMask = Phys.loose
+        body.categoryBitMask = Phys.ground
+        body.collisionBitMask = Phys.brick | Phys.ball | Phys.chip
         body.friction = 0.9
         ground.physicsBody = body
         scene.rootNode.addChildNode(ground)
@@ -750,13 +560,12 @@ final class World {
     }
 
     func load(_ battle: Battle) {
+        lockScene(); defer { unlockScene() }
         setArena(battle.arena)
-        castleViews.forEach { $0.root.removeFromParentNode() }
+        endPlay()
         looseRoot.childNodes.forEach { $0.removeFromParentNode() }
-        loose.removeAll(); rubble.removeAll()
         scene.removeAllParticleSystems()
-        castleViews = battle.castles.map { CastleView(castle: $0) }
-        castleViews.forEach { scene.rootNode.addChildNode($0.root) }
+        loadCastles(battle.designs, poses: battle.snapshots)
         ball.isHidden = true
         hidePreview()
         showTarget(nil)
@@ -765,102 +574,34 @@ final class World {
         scene.physicsWorld.speed = 1
     }
 
-    /// Builder preview: swaps the left castle for a design in progress.
-    func preview(_ design: CastleDesign) {
-        guard !castleViews.isEmpty else { return }
-        castleViews[0].root.removeFromParentNode()
-        let view = CastleView(castle: Castle(side: 0, design: design), physics: false)
-        castleViews[0] = view
-        scene.rootNode.addChildNode(view.root)
-    }
-
-    /// Shows the outcome of a shot: loose blocks, falling roofs, rebuilt walls and effects.
-    func showImpact(_ res: ShotResult, outcome: ShotOutcome) {
-        let sp = max(res.vel.length, 0.001)
-        let dir = SIMD3<Float>(Float(res.vel.x / sp), Float(res.vel.y / sp), Float(res.vel.z / sp))
-        let centers = res.blasts.map { ($0.center.f, Float($0.radius)) }
-        var any = false
-        for (i, d) in outcome.damage.enumerated() where d.cells > 0 || !d.crack.isEmpty {
-            any = true
-            let view = castleViews[i]
-            for id in d.blast {
-                let n = view.release(id)
-                // Thrown outward from whichever blast was closest.
-                var best = centers.first ?? (res.pos.f, Float(K.blastR)), bestD = Float.greatestFiniteMagnitude
-                for c in centers { let dist = simd_distance(n.simdPosition, c.0); if dist < bestD { bestD = dist; best = c } }
-                var o = n.simdPosition - best.0
-                let l = max(simd_length(o), 0.001)
-                o /= l
-                let k = 7 + 12 * (1 - min(1, l / best.1)) + Float.random(in: 0...4)
-                let v = o * k + dir * 7 + SIMD3(Float.random(in: -1.5...1.5), Float.random(in: 3...9), Float.random(in: -1.5...1.5))
-                n.physicsBody?.velocity = SCNVector3(v.x, v.y, v.z)
-                n.physicsBody?.angularVelocity = SCNVector4(Float.random(in: -1...1), Float.random(in: -1...1), Float.random(in: -1...1), Float.random(in: 2...9))
-                looseRoot.addChildNode(n)
-                loose.append((n, clock, false))
-            }
-            for id in d.crack where view.castle.blocks[id].alive {
-                burst(at: view.castle.center(of: view.castle.blocks[id]).f, colors: [0x5c6166, 0xb5b9bd], count: 8, speed: 3, life: 1.2, size: 1.0, accel: 1, cone: false, grow: 1.6, alpha: 0.5)
-            }
-            for id in d.fall {
-                let n = view.release(id)
-                n.physicsBody?.velocity = SCNVector3(Float.random(in: -1...1) + dir.x * 1.5, 0, Float.random(in: -1...1) + dir.z * 1.5)
-                n.physicsBody?.angularVelocity = SCNVector4(Float.random(in: -1...1), Float.random(in: -1...1), Float.random(in: -1...1), Float.random(in: 0...2))
-                looseRoot.addChildNode(n)
-                loose.append((n, clock, false))
-            }
-            for j in view.decor.indices where view.decor[j].alive {
-                let ids = view.decor[j].ids
-                let dead = ids.filter { !view.castle.blocks[$0].alive }.count
-                if !ids.isEmpty && dead * 2 < ids.count { continue }
-                view.decor[j].alive = false
-                let n = view.decor[j].node
-                let world = n.simdWorldPosition
-                n.removeFromParentNode()
-                n.simdPosition = world
-                let body = SCNPhysicsBody(type: .dynamic, shape: SCNPhysicsShape(node: n, options: [.type: SCNPhysicsShape.ShapeType.convexHull]))
-                body.mass = 6
-                body.categoryBitMask = Phys.loose
-                body.collisionBitMask = Phys.fixed | Phys.loose
-                body.velocity = SCNVector3(Float.random(in: -3...3) + dir.x * 4, Float.random(in: 4...8), Float.random(in: -3...3) + dir.z * 4)
-                body.angularVelocity = SCNVector4(Float.random(in: -1...1), 0.2, Float.random(in: -1...1), Float.random(in: 1...3))
-                n.physicsBody = body
-                looseRoot.addChildNode(n)
-                loose.append((n, clock, true))
-            }
-            if view.castle.heartLost, let p = view.breakGem(decoy: nil) {
-                burst(at: p, colors: [Look.heartColors(view.castle.heartKind).glow, 0xffffff, 0xffb3d1], count: 160, speed: 22, life: 1.2, size: 0.9, accel: -9, cone: false, additive: true)
-                flash(at: p, strength: 5200)
-            }
-            for k in d.decoys {
-                guard let p = view.breakGem(decoy: k) else { continue }
-                burst(at: p, colors: [0x8d8794, 0xc9c3cf], count: 50, speed: 7, life: 1.4, size: 1.6, accel: 2, cone: false, grow: 1.8, alpha: 0.6)
-            }
-            view.rebuildMesh()
-        }
+    /// Effects where a shot comes down: a splash, a thump of dust on the ground, sparks on stone.
+    func showLanding(_ res: ShotResult) {
+        let p = res.pos.f
         switch res.kind {
         case .out: break
-        case .water: splash(at: res.pos.f, big: true)
-        case .ground, .castle:
-            for (c, radius) in centers {
-                let big = CGFloat(radius / Float(K.blastR))
-                burst(at: c, colors: [0xffd84a, 0xff8a1e, 0xffffff], count: (any ? 90 : 36) * big * big, speed: (any ? 20 : 11) * big, life: 0.55, size: 1.4 * big, accel: -6, cone: false, additive: true)
-                burst(at: c + SIMD3(0, 1, 0), colors: [0x5c6166, 0x8b9096, 0xb5b9bd], count: (any ? 54 : 22) * big, speed: 6.5, life: 2.2, size: 2.4 * big, accel: 2.4, cone: false, grow: 1.9, alpha: 0.42)
-                flash(at: c, strength: 2600 * big)
-            }
-            if res.crit, let c = centers.first { burst(at: c.0, colors: [0xffe27a, 0xf2cd37], count: 80, speed: 26, life: 0.8, size: 0.8, accel: -10, cone: false, additive: true) }
-            if res.kind == .ground { burst(at: SIMD3(res.pos.f.x, 0.3, res.pos.f.z), colors: [0x4c7a39, 0x5b4630], count: 46, speed: 13, life: 1.0, size: 0.8, accel: -26, cone: true) }
+        case .water: splash(at: p, big: true)
+        case .ground:
+            burst(at: SIMD3(p.x, 0.3, p.z), colors: [0x4c7a39, 0x5b4630], count: 46, speed: 13, life: 1.0, size: 0.8, accel: -26, cone: true)
+            burst(at: p + SIMD3(0, 0.6, 0), colors: [0x8b7d66, 0xa59a86], count: 26, speed: 4, life: 1.8, size: 2.2, accel: 1.5, cone: false, grow: 1.8, alpha: 0.4)
+        case .castle:
+            burst(at: p, colors: [0xffd84a, 0xffffff], count: res.mega ? 70 : 30, speed: res.mega ? 18 : 11, life: 0.3, size: res.mega ? 1.3 : 0.8, accel: -6, cone: false, additive: true)
+            flash(at: p, strength: res.mega ? 2600 : 1200)
         }
-        if !outcome.repaired.isEmpty {
-            let spots = castleViews[res.shooter].restore(outcome.repaired)
-            for p in spots.prefix(14) { burst(at: p, colors: [0x7be08f, 0xffffff], count: 10, speed: 3, life: 1.0, size: 0.6, accel: 4, cone: false, additive: true) }
+        if res.mega && res.kind != .water && res.kind != .out {
+            burst(at: p + SIMD3(0, 0.5, 0), colors: [0xff8a1e, 0xffd84a], count: 120, speed: 24, life: 0.45, size: 1.1, accel: -4, cone: false, additive: true)
+            flash(at: p, strength: 4200)
         }
+        if res.crit { burst(at: p, colors: [0xffe27a, 0xf2cd37], count: 80, speed: 26, life: 0.8, size: 0.8, accel: -10, cone: false, additive: true) }
     }
 
-    /// Stands blocks back up outside of a shot, such as a living heart growing back.
-    func restoreBlocks(side: Int, ids: [Int]) {
+    /// Sparkles over bricks put back by a repair or a living heart.
+    func showRepair(side: Int, bricks: [Int], glow: UInt32 = 0x7be08f) {
         guard side < castleViews.count else { return }
-        let glow = Look.heartColors(castleViews[side].castle.heartKind).glow
-        for p in castleViews[side].restore(ids) { burst(at: p, colors: [glow, 0xffffff], count: 24, speed: 4, life: 1.2, size: 0.7, accel: 3, cone: false, additive: true) }
+        let v = castleViews[side]
+        for i in bricks.prefix(18) {
+            let p = v.world(v.home.poses[i].p)
+            burst(at: p, colors: [glow, 0xffffff], count: 12, speed: 3, life: 1.0, size: 0.6, accel: 4, cone: false, additive: true)
+        }
     }
 
     // MARK: Ball, preview, target, balloon, shield
@@ -1019,16 +760,16 @@ final class World {
 
     // MARK: Effects
 
-    private static func curve(_ values: [Double], _ times: [Double]) -> SCNParticlePropertyController {
+    static func curve(_ values: [Double], _ times: [Double]) -> SCNParticlePropertyController {
         let a = CAKeyframeAnimation()
         a.values = values
         a.keyTimes = times.map { NSNumber(value: $0) }
         return SCNParticlePropertyController(animation: a)
     }
 
-    private static let fade = curve([1.0, 0.85, 0.0], [0, 0.4, 1])
+    static let fade = curve([1.0, 0.85, 0.0], [0, 0.4, 1])
 
-    private static func makeTrail(color: UInt32, size: CGFloat, plain: Bool) -> SCNParticleSystem {
+    static func makeTrail(color: UInt32, size: CGFloat, plain: Bool) -> SCNParticleSystem {
         let ps = SCNParticleSystem()
         ps.particleImage = Textures.puff
         ps.birthRate = plain ? 70 : 100
@@ -1045,7 +786,7 @@ final class World {
     }
 
     /// One puff of particles. `grow` makes each sprite swell over its life, which is what sells smoke.
-    private func burst(at p: SIMD3<Float>, colors: [UInt32], count: CGFloat, speed: CGFloat, life: CGFloat, size: CGFloat, accel: Float, cone: Bool,
+    func burst(at p: SIMD3<Float>, colors: [UInt32], count: CGFloat, speed: CGFloat, life: CGFloat, size: CGFloat, accel: Float, cone: Bool,
                        direction: SIMD3<Float> = SIMD3(0, 1, 0), additive: Bool = false, grow: Double = 1, alpha: CGFloat = 0.7) {
         for hex in colors {
             let ps = SCNParticleSystem()
@@ -1075,7 +816,7 @@ final class World {
     }
 
     /// A short burst of light, so a blast shows on the walls around it.
-    private func flash(at p: SIMD3<Float>, strength: CGFloat) {
+    func flash(at p: SIMD3<Float>, strength: CGFloat) {
         let light = SCNLight()
         light.type = .omni
         light.color = UIColor(hex: 0xffb35a)
@@ -1089,44 +830,26 @@ final class World {
         n.runAction(.sequence([.customAction(duration: 0.28) { node, t in node.light?.intensity = strength * (1 - t / 0.28) }, .removeFromParentNode()]))
     }
 
-    private func splash(at p: SIMD3<Float>, big: Bool) {
+    func splash(at p: SIMD3<Float>, big: Bool) {
         burst(at: SIMD3(p.x, 0.3, p.z), colors: [0x8fc4e6, 0xffffff], count: big ? 80 : 10, speed: big ? 17 : 8, life: 1.0, size: big ? 0.9 : 0.6, accel: -28, cone: true)
         onSplash?()
     }
 
     // MARK: Per-frame upkeep
 
+    /// Holds off the render thread while bodies are added, swapped or removed; SceneKit's physics
+    /// step crashes on a body changed under it. Nested calls are counted.
+    func lockScene() {
+        if lockDepth == 0 { SCNTransaction.lock() }
+        lockDepth += 1
+    }
+    func unlockScene() {
+        lockDepth -= 1
+        if lockDepth == 0 { SCNTransaction.unlock() }
+    }
+
     func update(dt: TimeInterval) {
         clock += dt
-        sweep -= dt
-        guard sweep <= 0 else { return }
-        sweep = 0.25
-        var keep: [(node: SCNNode, born: TimeInterval, decor: Bool)] = []
-        for item in loose {
-            let p = item.node.presentation.simdWorldPosition
-            let age = clock - item.born
-            if p.y < 1.2 && arena.isWater(Double(p.x), Double(p.z)) {              // sank in the water
-                burst(at: SIMD3(p.x, 0.3, p.z), colors: [0x8fc4e6, 0xffffff], count: 8, speed: 7, life: 0.8, size: 0.6, accel: -28, cone: true)
-                item.node.removeFromParentNode()
-            } else if p.y < -3 || age > 30 {
-                item.node.removeFromParentNode()
-            } else if age > 7 {
-                let inside = castleViews.contains { v in
-                    let l = v.castle.local(Double(p.x), Double(p.z))
-                    return l.x > -1 && l.x < Double(K.gw) + 1 && l.z > -1 && l.z < Double(K.gd) + 1
-                }
-                if inside || item.decor {
-                    // clear rubble off the castle so what is still standing stays readable
-                    item.node.physicsBody = nil
-                    item.node.runAction(.sequence([.scale(to: 0.01, duration: 0.3), .removeFromParentNode()]))
-                } else {
-                    item.node.simdTransform = item.node.presentation.simdTransform
-                    item.node.physicsBody = nil
-                    rubble.append(item.node)
-                }
-            } else { keep.append(item) }
-        }
-        loose = keep
-        while rubble.count > 140 { rubble.removeFirst().removeFromParentNode() }
+        stepPlay(dt: dt)
     }
 }

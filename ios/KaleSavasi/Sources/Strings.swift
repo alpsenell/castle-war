@@ -583,4 +583,6 @@ enum Tx {
     static var partyShort: String { p("Herkes kendi için", "Free-for-all") }
     static var localPitch: String { p("Tek cihaz, iki kişi", "One device, two players") }
     static var players: String { p("Oyuncular", "Players") }
+    // MARK: 2.0 physics
+    static var settling: String { p("Taşlar düşüyor…", "Bricks falling…") }
 }
