@@ -126,7 +126,7 @@ extension World: BrickPhysics {
         let body = SCNPhysicsBody(type: dynamic ? .dynamic : .static, shape: BrickGeometry.physicsShape(n.brick.shape))
         if dynamic {
             // Hearts and decoys sit heavy, so a glancing blow cracks them rather than flinging them away.
-            body.mass = CGFloat(n.brick.mass * (n.brick.material.isCrystal ? 4 : 1))
+            body.mass = CGFloat(n.brick.mass * (n.brick.material.isCrystal ? 2 : 1))
             body.contactTestBitMask = Phys.ground | Phys.brick | Phys.ball
         }
         body.friction = n.brick.material == .ice ? 0.35 : n.brick.material.isCrystal ? 1 : 0.75

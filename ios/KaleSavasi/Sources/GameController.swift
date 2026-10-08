@@ -243,6 +243,8 @@ final class GameController: NSObject, ObservableObject {
                 self.aiLevel = self.difficulty
                 self.startGame(.campaign, designs: [self.myCastle, Stage.all[n - 1].design], rules: MatchRules(Stage.all[n - 1].modifier), stage: Stage.all[n - 1])
             }
+            // "-inspect" swings the camera round to the enemy castle.
+            if args.contains("-inspect") { DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.toggleInspect() } }
         }
         #endif
     }
