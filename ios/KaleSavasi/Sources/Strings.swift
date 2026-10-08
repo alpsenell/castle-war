@@ -25,9 +25,9 @@ enum Tx {
     static func pct(_ n: Int) -> String { lang == .tr ? "%\(n)" : "\(n)%" }
 
     // MARK: Menu
-    static var gameName: String { p("Kale Savaşı", "Castle War") }
-    static var logoTop: String { p("KALE", "CASTLE") }
-    static var logoBottom: String { p("SAVAŞI", "WAR") }
+    static var gameName: String { "Keepfall" }
+    static var logoTop: String { "KEEP" }
+    static var logoBottom: String { "FALL" }
     static var tagline: String { p("Sırayla ateş et, duvarları aş ve rakibin kalbini kır. Kalbi düşen kaybeder.", "Take turns firing, break through the walls and shatter the enemy heart. Lose your heart and you lose.") }
     static var vsComputer: String { p("Yapay zekâya karşı", "Play the computer") }
     static var difficulty: String { p("Zorluk", "Difficulty") }
@@ -397,7 +397,7 @@ enum Tx {
     static var friendHint: String { p("Kodunu yapıştır", "Paste their code") }
     static var friendName: String { p("Arkadaş", "Friend") }
     static func shareMessage(_ code: String) -> String {
-        p("Kalbimi kırabilir misin? Kale Savaşı'nda bu kodu yapıştır: \(code)", "Can you break my heart? Paste this code in Castle War: \(code)")
+        p("Kalbimi kırabilir misin? Keepfall'da bu kodu yapıştır: \(code)", "Can you break my heart? Paste this code in Keepfall: \(code)")
     }
 
     // MARK: Achievements
