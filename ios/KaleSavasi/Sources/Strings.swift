@@ -478,4 +478,14 @@ enum Tx {
     static var target: String { p("Hedef", "Target") }
     static var botTag: String { p("bilgisayar", "computer") }
     static func playerLeft(_ name: String) -> String { p("\(name) ayrıldı, yerine bilgisayar oynuyor", "\(name) left; a computer takes over") }
+
+    // MARK: 2.0 UI
+    static var play: String { p("OYNA", "PLAY") }
+    static var victory: String { p("ZAFER!", "VICTORY!") }
+    static var defeat: String { p("YENİLGİ", "DEFEAT") }
+    static var gameCenterPitch: String { p("Dünyadan rakipler", "Rivals worldwide") }
+    static var nearbyPitch: String { p("Yanındaki biriyle", "Someone close by") }
+    static var partyShort: String { p("Herkes kendi için", "Free-for-all") }
+    static var localPitch: String { p("Tek cihaz, iki kişi", "One device, two players") }
+    static var players: String { p("Oyuncular", "Players") }
 }
