@@ -90,7 +90,7 @@ struct Lobby: Equatable {
 /// Runs the match: whose turn it is, shots, the cameras and what the HUD shows.
 final class GameController: NSObject, ObservableObject {
     let world = World()
-    private let sfx = Sfx()
+    let sfx = Sfx()
 
     @Published var screen = Screen.menu
     @Published var panel = Panel.home
@@ -110,18 +110,30 @@ final class GameController: NSObject, ObservableObject {
     @Published var profile = Profile.load()
     @Published var language = Tx.lang { didSet { Tx.set(language); refreshHUD() } }
     @Published var confirmQuit = false
-    // Castle builder
-    @Published var draft = CastleDesign()
-    @Published var tool: PieceKind? = .wallLow
-    @Published var erasing = false
+    // Castle builder (actions in GameController+Builder.swift)
+    @Published var draft = BrickDesign()
+    @Published var buildTool = BuildTool.brick
+    @Published var buildShape = BrickShape.cube
+    @Published var buildMaterial = BrickMaterial.stone
+    @Published var buildStamp = Stamp.tower
+    @Published var buildRot = 0
+    /// Levels shown and buildable, in brick units.
+    @Published var buildLayer = BK.height
     @Published var builderNote: String?
+    @Published var undoStack: [BrickDesign] = []
+    @Published var redoStack: [BrickDesign] = []
+    @Published var testingGravity = false
+    var bench: BuildBench?
+    var buildGesture = BuildGesture.idle
+    var buildCam = BuildCam()
+    var buildNoteWork: DispatchWorkItem?
     /// The final, heart-breaking shot is playing out in slow motion.
     @Published var finale = false
     var viewSize = CGSize(width: 844, height: 390)
 
     private enum Phase { case menu, aim, flight, impact, over }
     private enum Driver { case human, computer, remote }
-    private enum Cam { case menu, aim, target, follow, impact, finale }
+    enum Cam { case menu, aim, target, follow, impact, finale }
     private struct Flight { var side: Int; var res: ShotResult; var path: [Vec3]; var i = 0.0; var popped = false; var final = false }
 
     private var mode = Mode.ai
@@ -144,7 +156,6 @@ final class GameController: NSObject, ObservableObject {
     /// Who the online opponent says they are, and the castle they brought.
     private var rival: (name: String, trophies: Int, level: Int, design: CastleDesign)?
     private var toastWork: DispatchWorkItem?
-    private var lastTile: (Int, Int)?
     // Gauntlet run
     private var gauntletRound = 1
     private var gauntletSeed: UInt32 = 0
@@ -165,14 +176,14 @@ final class GameController: NSObject, ObservableObject {
     private var lastSeen: [UInt32: Double] = [:]
     private var pingT = 0.0, clock = 0.0
     /// The castle the inspect and end-of-match cameras circle.
-    private var viewSeat = 1
+    var viewSeat = 1
 
-    private var cam = Cam.menu
+    var cam = Cam.menu
     private var camSide = 0
-    private var menuA = 0.7, orbitA = 0.0, orbitH = 28.0, orbitR = 56.0, orbitR0 = 56.0, impactA = 0.0, shake = 0.0
+    var menuA = 0.7, orbitA = 0.0, orbitH = 28.0, orbitR = 56.0, orbitR0 = 56.0, impactA = 0.0, shake = 0.0
     private var lastDrag: CGPoint?
     private var impactP = SIMD3<Float>(0, 0, 0), impactDir = SIMD3<Float>(1, 0, 0), ballDir = SIMD3<Float>(1, 0, 0)
-    private var camPos = SIMD3<Float>(100, 46, 100), camLook = SIMD3<Float>(0, 7, 0)
+    var camPos = SIMD3<Float>(100, 46, 100), camLook = SIMD3<Float>(0, 7, 0)
     private var fov: Float = 50
     private var link: CADisplayLink?
     private var lastTime: CFTimeInterval = 0
@@ -213,6 +224,7 @@ final class GameController: NSObject, ObservableObject {
         if ProcessInfo.processInfo.arguments.contains("-autoNearby") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.playOnline(.nearby) }
         }
+        builderLaunchHooks()
         #endif
     }
 
@@ -229,13 +241,13 @@ final class GameController: NSObject, ObservableObject {
     }
 
     /// The scene behind the menu: the player's own castle facing a random one.
-    private func resetBackdrop() {
+    func resetBackdrop() {
         let seed = UInt32.random(in: 0...UInt32.max)
-        battle = Battle(seed: seed, first: 0, designs: [profile.castle, Presets.pick(seed)])
+        battle = Battle(seed: seed, first: 0, designs: [profile.legacyCastle, Presets.pick(seed)])
         world.load(battle)
     }
 
-    private func thump(_ style: UIImpactFeedbackGenerator.FeedbackStyle) {
+    func thump(_ style: UIImpactFeedbackGenerator.FeedbackStyle) {
         if profile.haptics { UIImpactFeedbackGenerator(style: style).impactOccurred() }
     }
 
@@ -245,7 +257,7 @@ final class GameController: NSObject, ObservableObject {
         sfx.play(.tick)
         let seed = UInt32.random(in: 0...UInt32.max)
         aiLevel = difficulty
-        startGame(.ai, seed: seed, designs: [profile.castle, Presets.pick(seed)])
+        startGame(.ai, seed: seed, designs: [profile.legacyCastle, Presets.pick(seed)])
     }
 
     func playGauntlet() {
@@ -259,7 +271,7 @@ final class GameController: NSObject, ObservableObject {
     private func startGauntletRound() {
         let foe = Gauntlet.foe(round: gauntletRound, seed: gauntletSeed)
         aiLevel = foe.difficulty
-        startGame(.gauntlet, seed: gauntletSeed &+ UInt32(gauntletRound), designs: [profile.castle, foe.design], rules: MatchRules(foe.modifier), carry: gauntletCarry)
+        startGame(.gauntlet, seed: gauntletSeed &+ UInt32(gauntletRound), designs: [profile.legacyCastle, foe.design], rules: MatchRules(foe.modifier), carry: gauntletCarry)
         if foe.modifier == .none { show(toast: Tx.gauntletRound(gauntletRound)) }
     }
 
@@ -268,7 +280,7 @@ final class GameController: NSObject, ObservableObject {
         guard let d = CastleCode.decode(code) else { show(toast: Tx.codeInvalid); sfx.play(.thud); return }
         sfx.play(.tick)
         aiLevel = difficulty
-        startGame(.ai, designs: [profile.castle, d], friend: d)
+        startGame(.ai, designs: [profile.legacyCastle, d], friend: d)
     }
 
     /// Four castles: the player against three computers.
@@ -277,7 +289,7 @@ final class GameController: NSObject, ObservableObject {
         stopNet()
         aiLevel = difficulty
         var picks = Presets.all.shuffled()
-        seats = [SeatInfo(nonce: 0, name: Tx.you, level: profile.level, design: profile.castle.encoded)]
+        seats = [SeatInfo(nonce: 0, name: Tx.you, level: profile.level, design: profile.legacyCastle.encoded)]
         for i in 1..<4 { seats.append(SeatInfo(nonce: 0, name: Tx.seatName(i), level: 1, design: picks.removeFirst().encoded)) }
         startParty(seed: UInt32.random(in: 0...UInt32.max), me: 0, first: Int.random(in: 0..<4), round: 1)
     }
@@ -291,20 +303,20 @@ final class GameController: NSObject, ObservableObject {
         show(toast: Tx.partyTitle)
     }
 
-    func playLocal() { sfx.play(.tick); startGame(.local, designs: [profile.castle, profile.castle]) }
+    func playLocal() { sfx.play(.tick); startGame(.local, designs: [profile.legacyCastle, profile.legacyCastle]) }
 
     func playSiege() {
         sfx.play(.tick)
         let seed = Challenge.seed(day: Profile.dayString())
         let twist = Modifier.allCases[Int((seed / 7) % UInt32(Modifier.allCases.count))]
-        startGame(.challenge, seed: seed, designs: [profile.castle, Presets.pick(seed)], rules: MatchRules(twist, pickups: false))
+        startGame(.challenge, seed: seed, designs: [profile.legacyCastle, Presets.pick(seed)], rules: MatchRules(twist, pickups: false))
     }
 
     func playStage(_ s: Stage) {
         guard profile.isOpen(s) else { return }
         sfx.play(.tick)
         aiLevel = s.difficulty
-        startGame(.campaign, designs: [profile.castle, s.design], rules: MatchRules(s.modifier), stage: s)
+        startGame(.campaign, designs: [profile.legacyCastle, s.design], rules: MatchRules(s.modifier), stage: s)
     }
 
     func playOnline(_ kind: OnlineKind) {
@@ -378,10 +390,10 @@ final class GameController: NSObject, ObservableObject {
         case .campaign:
             if over?.hasNextStage == true { playStage(profile.nextStage) } else if let s = stage { playStage(s) }
         case .ai:
-            if let d = friendDesign { aiLevel = difficulty; startGame(.ai, designs: [profile.castle, d], friend: d) } else { playComputer() }
+            if let d = friendDesign { aiLevel = difficulty; startGame(.ai, designs: [profile.legacyCastle, d], friend: d) } else { playComputer() }
         case .gauntlet:
             if over?.gauntletNext == true { gauntletRound += 1; startGauntletRound() } else { playGauntlet() }
-        case .local: startGame(.local, first: 1 - battle.first, designs: [profile.castle, profile.castle])
+        case .local: startGame(.local, first: 1 - battle.first, designs: [profile.legacyCastle, profile.legacyCastle])
         case .party:
             if net == nil { playParty() }
             else if isHost { hostParty() }
@@ -448,104 +460,6 @@ final class GameController: NSObject, ObservableObject {
     func closeHowTo() {
         if !profile.seenHowTo { profile.seenHowTo = true; profile.save() }
         panel = .home
-    }
-
-    // MARK: Castle builder
-
-    func openBuilder() {
-        sfx.play(.tick)
-        draft = profile.castle
-        tool = .wallLow; erasing = false; builderNote = nil; lastTile = nil
-        screen = .builder
-        cam = .target
-        viewSeat = 0
-        orbitA = 0.75; orbitH = 30; orbitR = 54; orbitR0 = 54
-        world.preview(draft)
-    }
-
-    func pick(tool kind: PieceKind?) {
-        guard kind == nil || profile.owns(kind!) else { builderNote = Tx.needStars(Profile.starsNeeded(kind!)); return }
-        tool = kind
-        erasing = kind == nil
-        builderNote = nil
-        sfx.play(.tick)
-    }
-
-    /// A touch on the builder grid. `fresh` is the first touch of a stroke; dragging on only lays walls or erases.
-    func paint(row: Int, col: Int, fresh: Bool) {
-        guard screen == .builder, row >= 0, row < CastleDesign.rows, col >= 0, col < CastleDesign.cols else { return }
-        if !fresh, let t = lastTile, t == (row, col) { return }
-        lastTile = (row, col)
-        if erasing {
-            if let i = draft.piece(atRow: row, col: col) { draft.pieces.remove(at: i); draftChanged() }
-            return
-        }
-        guard let kind = tool else { return }
-        if !fresh && kind.span > 1 { return }
-        let n = kind.span
-        let tx = min(max(row - (n - 1) / 2, 0), CastleDesign.rows - n), tz = min(max(col - (n - 1) / 2, 0), CastleDesign.cols - n)
-        var next = draft
-        if n == 1, let i = next.piece(atRow: row, col: col) {
-            let old = next.pieces[i]
-            if old.kind == kind { if fresh { next.pieces.remove(at: i); draft = next; draftChanged() }; return }   // tap again to take it away
-            guard old.kind.span == 1 else { if fresh { builderNote = Tx.noRoom }; return }
-            next.pieces.remove(at: i)                                                                              // swap one wall for the other
-        }
-        if kind == .keep || kind == .heart { next.pieces.removeAll { $0.kind == kind } }      // only one of each: placing it again moves it
-        guard next.fits(kind, row: tx, col: tz) else { if fresh { builderNote = Tx.noRoom }; return }
-        next.pieces.append(Piece(kind: kind, tx: tx, tz: tz))
-        guard next.cost <= CastleDesign.budget else { builderNote = Tx.noStone; return }
-        guard next.decoys <= CastleDesign.maxDecoys else { builderNote = Tx.problem(.manyDecoys); return }
-        draft = next
-        draftChanged()
-    }
-
-    func strokeEnded() { lastTile = nil }
-
-    private func draftChanged() {
-        builderNote = nil
-        world.preview(draft)
-    }
-
-    func loadDraft(_ d: CastleDesign) { draft = d; draftChanged(); sfx.play(.tick) }
-
-    func pick(heart h: HeartKind) {
-        guard profile.owns(h) else { builderNote = Tx.heartLocked(h.level); return }
-        var next = draft
-        next.heart = h
-        guard next.cost <= CastleDesign.budget else { builderNote = Tx.noStone; return }
-        draft = next
-        draftChanged()
-        builderNote = Tx.heart(h) + ": " + Tx.heartInfo(h)
-        sfx.play(.tick)
-    }
-
-    /// The draft as a code to send, once it is a castle that can be played.
-    var draftCode: String? { draft.problem == nil ? CastleCode.encode(draft) : nil }
-
-    func pasteCastle(_ text: String) {
-        guard let d = CastleCode.decode(text) else { builderNote = Tx.codeInvalid; sfx.play(.thud); return }
-        loadDraft(d)
-        builderNote = Tx.codeLoaded
-    }
-
-    func saveCastle() {
-        if let pr = draft.problem { builderNote = Tx.problem(pr); return }
-        profile.design = draft.encoded
-        profile.castlesSaved += 1
-        let fresh = profile.unlockAchievements()
-        profile.save()
-        sfx.play(.charged)
-        closeBuilder()
-        show(toast: fresh.first.map(Tx.achievementDone) ?? Tx.saved)
-    }
-
-    func closeBuilder() {
-        screen = .menu
-        panel = .home
-        cam = .menu
-        menuA = Double(atan2(camPos.x, camPos.z))
-        resetBackdrop()
     }
 
     // MARK: Turn flow
@@ -928,7 +842,7 @@ final class GameController: NSObject, ObservableObject {
         present(info)
     }
 
-    private func show(toast msg: String) {
+    func show(toast msg: String) {
         toastWork?.cancel()
         toast = msg
         let w = DispatchWorkItem { [weak self] in self?.toast = nil }
@@ -1069,7 +983,7 @@ final class GameController: NSObject, ObservableObject {
     }
 
     private func sendHello() {
-        net?.send(NetMessage(t: "hello", nonce: myNonce, name: profile.name, trophies: profile.trophies, level: profile.level, design: profile.castle.encoded,
+        net?.send(NetMessage(t: "hello", nonce: myNonce, name: profile.name, trophies: profile.trophies, level: profile.level, design: profile.legacyCastle.encoded,
                              rules: K.rulesVersion), reliable: true)
     }
 
@@ -1104,7 +1018,7 @@ final class GameController: NSObject, ObservableObject {
         isHost = true
         round += 1
         if round == 1 {
-            seats = [SeatInfo(nonce: myNonce, name: profile.name, level: profile.level, design: profile.castle.encoded)]
+            seats = [SeatInfo(nonce: myNonce, name: profile.name, level: profile.level, design: profile.legacyCastle.encoded)]
             seats += partyPeers.values.sorted { $0.nonce < $1.nonce }.prefix(3)
             var picks = Presets.all.shuffled()
             while seats.count < 4 { seats.append(SeatInfo(nonce: 0, name: Tx.seatName(seats.count), level: 1, design: picks.removeFirst().encoded)) }
@@ -1186,7 +1100,7 @@ final class GameController: NSObject, ObservableObject {
         round += 1
         let seed = UInt32.random(in: 0...UInt32.max), first = (round + 1) % 2
         net?.send(NetMessage(t: "start", seed: seed, round: round, first: first), reliable: true)
-        startGame(.online, seed: seed, me: 0, first: first, round: round, designs: [profile.castle, rival?.design ?? .classic])
+        startGame(.online, seed: seed, me: 0, first: first, round: round, designs: [profile.legacyCastle, rival?.design ?? .classic])
         announceRival()
     }
 
@@ -1217,7 +1131,7 @@ final class GameController: NSObject, ObservableObject {
             if isHost && round == 0 { hostNewRound() }
         case "start":
             guard !isHost, let seed = m.seed, let r = m.round, let first = m.first, first == 0 || first == 1 else { return }
-            startGame(.online, seed: seed, me: 1, first: first, round: r, designs: [rival?.design ?? .classic, profile.castle])
+            startGame(.online, seed: seed, me: 1, first: first, round: r, designs: [rival?.design ?? .classic, profile.legacyCastle])
             announceRival()
         case "aim":
             guard phase == .aim, driver == .remote, let y = m.yaw, let p = m.power, y.isFinite, p.isFinite else { return }
@@ -1402,17 +1316,14 @@ final class GameController: NSObject, ObservableObject {
             tLook.y = 4.2
             k = 4.5
             wantFov = 46
+        case .target where screen == .builder:
+            (tPos, tLook) = builderCamera()
+            k = 9
         case .target:
             if phase == .over { orbitA += dt * 0.12 }
             let c = battle.arena.castleCenter(min(viewSeat, battle.castles.count - 1)).f
             tPos = SIMD3(c.x + Float(cos(orbitA) * orbitR), Float(orbitH), c.z + Float(sin(orbitA) * orbitR))
             tLook = SIMD3(c.x, 7, c.z)
-            if screen == .builder {
-                // The grid covers the left of the screen, so frame the castle in the right half.
-                let f = simd_normalize(SIMD3<Float>(tLook.x - tPos.x, 0, tLook.z - tPos.z))
-                let left = SIMD3<Float>(f.z, 0, -f.x) * Float(orbitR) * 0.3
-                tPos += left; tLook += left
-            }
             k = 4
         case .follow:
             let b = world.ball.simdPosition, d = ballDir
