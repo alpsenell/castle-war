@@ -34,7 +34,7 @@ enum K {
     static let ballMass: Float = 20                  // a cannonball's mass in the physics world
     static let maxChips = 90                         // fragments alive at once
     static let brickGravity = 20.0                  // the physics world's gravity, stronger than the flight's so bricks fall snappily
-    static let rulesVersion = 5                      // bumped whenever an online match would play out differently
+    static let rulesVersion = 6                      // bumped whenever an online match would play out differently
 }
 
 struct Mulberry32 {

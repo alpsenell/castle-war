@@ -21,7 +21,7 @@ struct NetMessage: Codable {
     var name: String? = nil
     var trophies: Int? = nil
     var level: Int? = nil
-    /// The sender's castle, in the flat form of `CastleDesign.encoded`.
+    /// The sender's castle, in the flat form of `BrickDesign.encoded` (about 3.5 KB of JSON at 260 bricks).
     var design: [Int]? = nil
     /// Special shot used, as `Ammo.rawValue`.
     var ammo: Int? = nil
@@ -31,6 +31,8 @@ struct NetMessage: Codable {
     var seat: Int? = nil
     /// Four-castle "start": who sits where. A nonce of 0 is a computer player run by the host.
     var seats: [SeatInfo]? = nil
+    /// "settle": per castle, base64 of `CastleSnapshot.delta` from the poses before the shot.
+    var data: [String]? = nil
 }
 
 struct SeatInfo: Codable, Equatable {

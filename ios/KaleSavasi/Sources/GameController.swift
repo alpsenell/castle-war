@@ -137,6 +137,12 @@ final class GameController: NSObject, ObservableObject {
     private struct Flight { var side: Int; var res: ShotResult; var path: [Vec3]; var i = 0.0; var popped = false; var final = false }
     /// The shot whose physics is playing out, until the castles settle.
     private var settling: Flight?
+    /// Online, a shot fired on another device: this device's own settle, kept while waiting for
+    /// the shooter's, and how long is left to wait.
+    private var localSettle: SettleReport?
+    private var settleWait = 0.0
+    /// Shooters' "settle" messages that came in before this device was ready for them, by shot.
+    private var authSettles: [Int: NetMessage] = [:]
     private var lastBreakSound: [BrickMaterial: Double] = [:]
 
     private var mode = Mode.ai
@@ -507,7 +513,7 @@ final class GameController: NSObject, ObservableObject {
         self.round = round
         self.stage = stage
         oppGone = false; wantAgain = false; oppAgain = false; pendingShot = nil
-        flight = nil; settling = nil; plan = nil; remoteAim = nil; ts = 1; slowT = 0
+        flight = nil; settling = nil; localSettle = nil; authSettles = [:]; plan = nil; remoteAim = nil; ts = 1; slowT = 0
         battle = Battle(seed: seed ?? UInt32.random(in: 0...UInt32.max), first: first, designs: designs, rules: rules, arena: arena)
         if let c = carry { battle.castles[0].adopt(c) }
         world.load(battle)
@@ -662,13 +668,67 @@ final class GameController: NSObject, ObservableObject {
         }
     }
 
-    /// The castles have come to rest: the rules read them and the turn wraps up.
+    /// Online, the shooter's device decides how a shot settled: it sends its poses, everyone
+    /// else shows their own physics until those arrive and then takes them over.
+    private var syncsShots: Bool { mode == .online || partyOnline }
+
+    /// The castles have come to rest on this device.
     private func settled(_ report: SettleReport?) {
+        guard let f = settling, phase == .impact, localSettle == nil else { return }
+        guard let report, syncsShots else { conclude(report); return }
+        let before = battle.snapshots
+        if driverOf(f.side) != .remote {
+            // Everyone, this device included, rules on the same rounded poses.
+            let deltas = before.indices.map { report.snapshots[$0].delta(from: before[$0]) }
+            var m = NetMessage(t: "settle", round: round, k: battle.shot)
+            m.seat = f.side
+            m.data = deltas.map { $0.base64EncodedString() }
+            net?.send(m, reliable: true)
+            conclude(SettleReport(snapshots: before.indices.map { before[$0].applying(deltas[$0]) ?? report.snapshots[$0] }))
+        } else {
+            localSettle = report
+            settleWait = 10
+            adoptSettle()
+        }
+    }
+
+    /// Takes over the shooter's settle once both it and this device's own have come in.
+    private func adoptSettle() {
+        guard settling != nil, localSettle != nil, let m = authSettles[battle.shot], let list = m.data else { return }
+        authSettles = authSettles.filter { $0.key > battle.shot }
+        let before = battle.snapshots
+        guard list.count == before.count else { settleTimedOut(); return }
+        var snaps: [CastleSnapshot] = []
+        for (i, s) in list.enumerated() {
+            guard let d = Data(base64Encoded: s), let next = before[i].applying(d) else { settleTimedOut(); return }
+            snaps.append(next)
+        }
+        localSettle = nil
+        world.adopt(snaps, blend: 0.4)
+        conclude(SettleReport(snapshots: snaps))
+    }
+
+    /// No settle came from the shooter: this device's own physics decides.
+    private func settleTimedOut() {
+        guard let local = localSettle else { return }
+        print("SYNC no settle for round \(round) shot \(battle.shot); using this device's physics")
+        localSettle = nil
+        conclude(local)
+    }
+
+    /// The rules read the settled castles and the turn wraps up.
+    private func conclude(_ report: SettleReport?) {
         guard let f = settling, phase == .impact else { return }
         settling = nil
         let res = f.res
         let chargeBefore = battle.charge
         let out = battle.apply(res, settle: report)
+        #if DEBUG
+        if syncsShots {
+            let pcts = battle.castles.map { String(format: "%.4f", $0.pct) }.joined(separator: " ")
+            print("SYNC round=\(round) shot=\(battle.shot) shooter=\(f.side) auth=\(driverOf(f.side) != .remote) standing=[\(pcts)] hearts=\(battle.castles.map { $0.heartLost ? 0 : 1 }) charge=\(battle.charge.map { String(format: "%.3f", $0) })")
+        }
+        #endif
         for i in battle.castles.indices { world.setShield(i, on: battle.shield[i]) }
         if !out.repaired.isEmpty {
             world.adopt(battle.snapshots, blend: 0.5)
@@ -839,7 +899,8 @@ final class GameController: NSObject, ObservableObject {
             self.screen = .over
             #if DEBUG
             // Unattended gauntlet runs go straight on to the next castle.
-            if self.autoPlay, self.mode == .gauntlet, info.gauntletNext {
+            // Unattended online runs ask for a rematch.
+            if self.autoPlay, (self.mode == .gauntlet && info.gauntletNext) || self.mode == .online {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in if self?.screen == .over { self?.rematch() } }
             }
             #endif
@@ -943,23 +1004,32 @@ final class GameController: NSObject, ObservableObject {
     }
 
     #if DEBUG
-    /// "-balance": the next computer-against-computer match, three per ready-made castle.
+    /// "-balance [N]": computer-against-computer matches at medium, each ready-made castle in turn
+    /// against the classic one, sides and first shot alternating. Stops after N matches (default 70).
     private func nextBalanceMatch() {
-        let n = Presets.all.count
-        if balanceRun.game >= 3 { balanceRun.game = 0; balanceRun.preset += 1 }
-        guard balanceRun.preset < n else {
+        let args = ProcessInfo.processInfo.arguments
+        let total = args.firstIndex(of: "-balance").flatMap { $0 + 1 < args.count ? Int(args[$0 + 1]) : nil } ?? 70
+        let g = balanceRun.game
+        guard g < total else {
             print("BALANCE done\n" + balanceRun.log.joined(separator: "\n"))
             return
         }
-        let mine = Presets.all[(balanceRun.preset + 1 + balanceRun.game) % n]
-        presetCastle = mine
+        let foe = 1 + (g / 2) % (Presets.all.count - 1), classicSide = g % 2
+        var designs = [Presets.classic, Presets.classic]
+        designs[1 - classicSide] = Presets.all[foe]
+        balanceRun.preset = foe
+        presetCastle = designs[0]
         aiLevel = .orta
-        startGame(.ai, designs: [mine, Presets.all[balanceRun.preset]])
+        startGame(.ai, first: (g / (2 * (Presets.all.count - 1))) % 2 == 0 ? g % 2 : 1 - g % 2, designs: designs)
     }
 
     private func logBalance(winner: Int) {
-        let line = String(format: "BALANCE preset=%d game=%d winner=%d shots=%d pct=%.2f/%.2f", balanceRun.preset, balanceRun.game, winner, battle.shot + 1,
-                          battle.castles[0].pct, battle.castles[1].pct)
+        let loser = 1 - winner, c = battle.castles[loser]
+        var cause = "-"
+        if let h = c.heartIndex { cause = c.snap.poses[h].broken ? "broken" : c.crystalGone(h) ? "knocked" : "floor" }
+        let classicSide = balanceRun.game % 2
+        let line = String(format: "BALANCE game=%d preset=%d classicSide=%d first=%d winner=%d presetWon=%d shots=%d cause=%@ pct=%.2f/%.2f", balanceRun.game, balanceRun.preset,
+                          classicSide, battle.first, winner, winner != classicSide ? 1 : 0, battle.shot + 1, cause, battle.castles[0].pct, battle.castles[1].pct)
         print(line)
         balanceRun.log.append(line)
         if let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
@@ -1268,6 +1338,9 @@ final class GameController: NSObject, ObservableObject {
         case "shot", "skip":
             pendingShot = m
             checkRemote()
+        case "settle":
+            if m.round == round, let k = m.k { authSettles[k] = m }
+            adoptSettle()
         case "again":
             guard m.round == round else { return }
             oppAgain = true
@@ -1304,6 +1377,10 @@ final class GameController: NSObject, ObservableObject {
             guard mode == .party else { return }
             pendingShot = m
             checkRemote()
+        case "settle":
+            guard mode == .party else { return }
+            if m.round == round, let k = m.k { authSettles[k] = m }
+            adoptSettle()
         case "bot":
             guard let i = m.seat, seatGone.indices.contains(i), !seatGone[i] else { return }
             seatGone[i] = true
@@ -1399,6 +1476,10 @@ final class GameController: NSObject, ObservableObject {
             if f.i >= Double(n) { impact() }
         } else if phase == .impact {
             if slowT > 0 { slowT -= dt; ts = finale ? 0.3 : 0.45 } else { ts = min(1, ts + dt * 2.5) }
+            if localSettle != nil {
+                settleWait -= dt
+                if settleWait <= 0 { settleTimedOut() }
+            }
             // The turn ends a moment after the castles have settled.
             if settling == nil {
                 impactT -= dt
