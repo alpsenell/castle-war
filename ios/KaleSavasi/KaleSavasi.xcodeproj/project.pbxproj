@@ -15,8 +15,10 @@
 		687D6577945EAB72D84D4F38 /* Menus.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB8224A17A6FB3CBB5E79D2D /* Menus.swift */; };
 		691CC73C55EF7408772C48F2 /* Strings.swift in Sources */ = {isa = PBXBuildFile; fileRef = D74DDD83CE8BEF18F51187EC /* Strings.swift */; };
 		7CA8724B0C2CD70D84316BB7 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = 38B5CCF673CF05A36471F7A4 /* InfoPlist.strings */; };
+		96D9BA2182943F859CBDE186 /* BrickGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFCA23F68AE5AD47666CB567 /* BrickGeometry.swift */; };
 		9C304F6BD7623CF8AC36009C /* GameController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7A1AE2CF41C6AE22B158A24 /* GameController.swift */; };
 		C8B7FA012529A7259C16C192 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F9AFA7634DE71857938BFD35 /* Assets.xcassets */; };
+		DDC3CF3096FCB62119A012FD /* Bricks.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3C9AA6B945C584FB7A351AA /* Bricks.swift */; };
 		E176E306895D1C359BE2B975 /* Sfx.swift in Sources */ = {isa = PBXBuildFile; fileRef = 930588B241A4AEA001E25EF6 /* Sfx.swift */; };
 		E25292221B0D944D4CCD3A03 /* Profile.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFB2E22A6C6B4617463F7EEF /* Profile.swift */; };
 /* End PBXBuildFile section */
@@ -30,6 +32,8 @@
 		914D6F007EA7A24B1C52E564 /* World.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = World.swift; sourceTree = "<group>"; };
 		930588B241A4AEA001E25EF6 /* Sfx.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sfx.swift; sourceTree = "<group>"; };
 		A7A1AE2CF41C6AE22B158A24 /* GameController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameController.swift; sourceTree = "<group>"; };
+		B3C9AA6B945C584FB7A351AA /* Bricks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Bricks.swift; sourceTree = "<group>"; };
+		BFCA23F68AE5AD47666CB567 /* BrickGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrickGeometry.swift; sourceTree = "<group>"; };
 		C88C3ADE02D935BE5197ABE7 /* tr */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = tr; path = tr.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 		CB8224A17A6FB3CBB5E79D2D /* Menus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Menus.swift; sourceTree = "<group>"; };
 		D74DDD83CE8BEF18F51187EC /* Strings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Strings.swift; sourceTree = "<group>"; };
@@ -43,6 +47,8 @@
 			isa = PBXGroup;
 			children = (
 				F9AFA7634DE71857938BFD35 /* Assets.xcassets */,
+				BFCA23F68AE5AD47666CB567 /* BrickGeometry.swift */,
+				B3C9AA6B945C584FB7A351AA /* Bricks.swift */,
 				A7A1AE2CF41C6AE22B158A24 /* GameController.swift */,
 				CB8224A17A6FB3CBB5E79D2D /* Menus.swift */,
 				8DCB1F1E5FF3A8CB55F594C5 /* Net.swift */,
@@ -147,6 +153,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				96D9BA2182943F859CBDE186 /* BrickGeometry.swift in Sources */,
+				DDC3CF3096FCB62119A012FD /* Bricks.swift in Sources */,
 				9C304F6BD7623CF8AC36009C /* GameController.swift in Sources */,
 				687D6577945EAB72D84D4F38 /* Menus.swift in Sources */,
 				33BEED068E0A700B12F284BA /* Net.swift in Sources */,
