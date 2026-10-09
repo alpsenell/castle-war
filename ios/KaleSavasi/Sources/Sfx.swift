@@ -2,38 +2,95 @@ import AVFoundation
 
 /// Short synthesized sound effects; nothing is loaded from disk.
 final class Sfx {
-    enum Sound: CaseIterable { case fire, hit, thud, splash, win, lose, tick, crit, charged, woodBreak, stoneBreak, iceBreak, ironClang }
+    enum Sound: CaseIterable {
+        case fire, hit, thud, splash, win, lose, tick, crit, charged, woodBreak, stoneBreak, iceBreak, ironClang
+
+        /// Higher-ranked sounds may take over a voice from lower-ranked ones, never the reverse.
+        var rank: Int {
+            switch self {
+            case .thud: return 0
+            case .woodBreak, .stoneBreak, .iceBreak, .ironClang: return 1
+            case .splash: return 2
+            default: return 3
+            }
+        }
+        /// Shortest time between two plays of the same sound; contacts can ask every frame.
+        var gap: Double {
+            switch self {
+            case .thud: return 0.22
+            case .woodBreak, .stoneBreak, .iceBreak: return 0.09
+            case .ironClang, .splash: return 0.15
+            case .tick: return 0.03
+            default: return 0
+            }
+        }
+        var volume: Float {
+            switch self {
+            case .thud: return 0.55
+            case .woodBreak, .stoneBreak, .iceBreak, .ironClang: return 0.75
+            default: return 1
+            }
+        }
+    }
 
     var enabled = true
     private let engine = AVAudioEngine()
     private var players: [AVAudioPlayerNode] = []
+    /// Per voice: when its sound ends and how much that sound matters.
+    private var busyUntil: [Double] = []
+    private var rank: [Int] = []
+    private var lastPlayed: [Sound: Double] = [:]
     private var buffers: [Sound: AVAudioPCMBuffer] = [:]
-    private var next = 0
     private let rate = 44100.0
     private let format = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 1)!
 
     init() {
         try? AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
         try? AVAudioSession.sharedInstance().setActive(true)
-        for _ in 0..<8 {
+        for _ in 0..<12 {
             let p = AVAudioPlayerNode()
             engine.attach(p)
             engine.connect(p, to: engine.mainMixerNode, format: format)
             players.append(p)
         }
+        // Many voices at once would add up past full scale and crackle; a limiter keeps the sum clean.
+        let limiter = AVAudioUnitEffect(audioComponentDescription: AudioComponentDescription(
+            componentType: kAudioUnitType_Effect, componentSubType: kAudioUnitSubType_PeakLimiter,
+            componentManufacturer: kAudioUnitManufacturer_Apple, componentFlags: 0, componentFlagsMask: 0))
+        engine.attach(limiter)
+        engine.connect(engine.mainMixerNode, to: limiter, format: nil)
+        engine.connect(limiter, to: engine.outputNode, format: nil)
+        busyUntil = Array(repeating: 0, count: players.count)
+        rank = Array(repeating: 0, count: players.count)
         for s in Sound.allCases { buffers[s] = make(s) }
         try? engine.start()
     }
 
+    /// Plays a sound on a free voice. When every voice is busy it takes over the oldest voice
+    /// playing something less important; a burst of brick sounds never cuts off a shot or a fanfare.
     func play(_ s: Sound) {
         guard enabled, let b = buffers[s] else { return }
+        let now = CACurrentMediaTime()
+        guard now - (lastPlayed[s] ?? -1) >= s.gap else { return }
         if !engine.isRunning { try? engine.start() }
         guard engine.isRunning else { return }
-        let p = players[next]
-        next = (next + 1) % players.count
+        let free = busyUntil.indices.filter { busyUntil[$0] <= now }
+        let i: Int
+        if let f = free.first {
+            i = f
+        } else if let low = rank.indices.filter({ rank[$0] < s.rank }).min(by: { busyUntil[$0] < busyUntil[$1] }) {
+            i = low
+        } else {
+            return
+        }
+        lastPlayed[s] = now
+        let p = players[i]
         p.stop()
+        p.volume = s.volume
         p.scheduleBuffer(b, at: nil, options: [])
         p.play()
+        busyUntil[i] = now + Double(b.frameLength) / rate
+        rank[i] = s.rank
     }
 
     private func buffer(_ dur: Double, _ gen: (Double) -> Double) -> AVAudioPCMBuffer {
