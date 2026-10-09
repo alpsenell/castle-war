@@ -524,6 +524,9 @@ final class GameController: NSObject, ObservableObject {
         flight = nil; settling = nil; localSettle = nil; authSettles = [:]; plan = nil; remoteAim = nil; ts = 1; slowT = 0
         battle = Battle(seed: seed ?? UInt32.random(in: 0...UInt32.max), first: first, designs: designs, rules: rules, arena: arena)
         if let c = carry { battle.castles[0].adopt(c) }
+        #if DEBUG
+        print("MATCH mode=\(m) bricks=\(designs.map { $0.bricks.count }) coins=\(designs.map { $0.cost })")
+        #endif
         world.load(battle)
         let n = arena.seats
         aims = Array(repeating: Aim(), count: n)
@@ -908,6 +911,9 @@ final class GameController: NSObject, ObservableObject {
 
     private func present(_ info: OverInfo) {
         refreshHUD()
+        #if DEBUG
+        print("OVER mode=\(mode) won=\(info.won.map(String.init) ?? "-") shots=\(battle.shot + 1) title=\(info.title)")
+        #endif
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
             guard let self, self.phase == .over else { return }
             self.finale = false

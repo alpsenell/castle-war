@@ -521,11 +521,6 @@ struct CampaignView: View {
                     .frame(height: 212.u)
                 HStack(spacing: 14.u) {
                     Pill(text: "\(p.totalStars)/\(Stage.all.count * 3)", icon: "star.fill", tint: Theme.goldLight)
-                    ForEach([PieceKind.tallTower, .bastion]) { k in
-                        Label("\(Tx.piece(k)): \(Profile.starsNeeded(k))", systemImage: p.owns(k) ? "checkmark.seal.fill" : "lock.fill")
-                            .font(Theme.body(12, .bold)).foregroundStyle(p.owns(k) ? Theme.greenDark : Theme.muted)
-                            .lineLimit(1).minimumScaleFactor(0.7)
-                    }
                 }
             }
         }
@@ -765,7 +760,6 @@ struct RewardPanel: View {
     private var notes: [String] {
         var out: [String] = reward.achievements.map(Tx.achievementDone)
         if reward.gauntletNewBest { out.append(Tx.gauntletNewBest) }
-        if let k = reward.unlockedPiece { out.append(Tx.pieceUnlocked(Tx.piece(k))) }
         if reward.levelAfter > reward.levelBefore {
             var line = Tx.levelUp(reward.levelAfter)
             if let b = reward.unlockedBall { line += " · " + Tx.unlocked(Tx.ball(b)) }

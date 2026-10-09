@@ -181,7 +181,6 @@ struct Reward: Equatable {
     // Daily siege only
     /// Campaign only: stars for this win, and whether it beat the stage's earlier best.
     var stars: Int?
-    var unlockedPiece: PieceKind?
     var siegeFirstToday = false
     var siegeNewBest = false
     var siegeBest = 0, siegeRecord = 0
@@ -286,9 +285,6 @@ struct Profile: Codable, Equatable {
     func isOpen(_ stage: Stage) -> Bool { stage.id == 1 || (stage.id - 2 < stars.count && stars[stage.id - 2] > 0) }
     var nextStage: Stage { Stage.all.first { stars(for: $0) == 0 } ?? Stage.all[Stage.all.count - 1] }
 
-    /// Campaign stars needed before a building piece can be used.
-    static func starsNeeded(_ kind: PieceKind) -> Int { kind == .tallTower ? 5 : kind == .bastion ? 12 : 0 }
-    func owns(_ kind: PieceKind) -> Bool { totalStars >= Profile.starsNeeded(kind) }
     func owns(_ heart: HeartKind) -> Bool { level >= heart.level }
 
     static func xpToNext(_ level: Int) -> Int { 100 + 60 * (level - 1) }
@@ -402,11 +398,9 @@ struct Profile: Codable, Equatable {
                          stage: Stage? = nil, stageStars: Int = 0, now: Date = Date()) -> Reward {
         var r = Reward()
         if let stage, won {
-            let before = totalStars
             while stars.count < stage.id { stars.append(0) }
             stars[stage.id - 1] = max(stars[stage.id - 1], stageStars)
             r.stars = stageStars
-            r.unlockedPiece = PieceKind.allCases.first { Profile.starsNeeded($0) > before && Profile.starsNeeded($0) <= totalStars }
         }
         r.levelBefore = level
         r.progressBefore = levelProgress

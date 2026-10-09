@@ -394,7 +394,7 @@ extension GameController {
     #if DEBUG
     /// "-screen builder" opens the builder at launch; "-demoCastle N" loads a demo into it
     /// (0 showcase, 1… presets, 50 every stamp, 60 a broken castle); "-demoGhost" shows a ghost
-    /// brick at the middle of the screen; "-demoGravity" runs Test gravity; "-demoTool erase|stamp|look",
+    /// brick at the middle of the screen; "-demoGravity" runs Test gravity; "-demoSave" saves after 8 s; "-demoTool erase|stamp|look",
     /// "-demoShape N", "-demoMaterial N" and "-demoLayer N" set the tray.
     func builderLaunchHooks() {
         let args = ProcessInfo.processInfo.arguments
@@ -426,6 +426,9 @@ extension GameController {
             }
             if args.contains("-demoGravity") {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [self] in testGravity() }
+            }
+            if args.contains("-demoSave") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [self] in saveCastle() }
             }
         }
     }
