@@ -364,7 +364,7 @@ private struct CoinMeter: View {
             }
             .frame(width: 20 * u, height: 20 * u)
             VStack(alignment: .leading, spacing: 2) {
-                Text("\(cost) / \(BK.budget)").font(BuildStyle.number(u)).monospacedDigit()
+                Text(verbatim: "\(cost) / \(BK.budget)").font(BuildStyle.number(u)).monospacedDigit()
                     .foregroundStyle(over ? BuildStyle.bad : BuildStyle.ink)
                 GeometryReader { g in
                     ZStack(alignment: .leading) {
