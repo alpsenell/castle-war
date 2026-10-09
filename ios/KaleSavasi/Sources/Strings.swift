@@ -103,7 +103,9 @@ enum Tx {
     static func standing(_ a: String, _ pa: Int, _ b: String, _ pb: Int) -> String {
         p("Ayakta kalan yapı: \(a) \(pct(pa)), \(b) \(pct(pb)).", "Still standing: \(a) \(pct(pa)), \(b) \(pct(pb)).")
     }
-    static func heartFell(_ name: String) -> String { p("\(name) kalbini kaybetti.", "\(name) lost their heart.") }
+    static func heartFell(_ name: String) -> String {
+        name == you ? p("Kalbini kaybettin.", "You lost your heart.") : p("\(name) kalbini kaybetti.", "\(name) lost their heart.")
+    }
     static var forfeitWin: String { p("Rakip ayrıldı, maç senin.", "Your opponent left. The match is yours.") }
     static var rematchWanted: String { p("Rakip tekrar oynamak istiyor.", "Your opponent wants a rematch.") }
     static var rematchGone: String { p("Rakip ayrıldı. Ana menüden yeni bir eşleşme başlat.", "Your opponent left. Start a new match from the main menu.") }

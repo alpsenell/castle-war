@@ -177,8 +177,7 @@ seed; the computer is easy for castles 1–3, medium for 4–7 and hard after th
 the enemy brings a living heart, from castle 11 an aegis heart, and every third castle from
 the fourth adds a match twist. Damage to your castle carries into the next fight; each win
 puts back up to 40 % of its mass. Every fight pays XP (20 plus 6 per castle toppled so far for a
-win, 10 for the loss that ends the run), and the best run is kept. In computer-run tests a
-hard-level player toppled about five castles on average and ten at best.
+win, 10 for the loss that ends the run), and the best run is kept.
 
 ### Castle codes
 
