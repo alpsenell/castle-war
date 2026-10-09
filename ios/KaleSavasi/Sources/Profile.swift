@@ -417,7 +417,7 @@ struct Profile: Codable, Equatable {
         decoysFooled += facts.decoysFooled
         if won && !forfeit {
             if facts.heartPct >= 1 { flawlessWins += 1 }
-            if facts.castlePct < 0.3 { comebackWins += 1 }
+            if facts.castlePct < 0.5 { comebackWins += 1 }
             if facts.friend { friendWins += 1 }
         }
         let stake = mode.trophies(mine: trophies)
@@ -454,7 +454,7 @@ struct Profile: Codable, Equatable {
         decoysFooled += facts.decoysFooled
         if won {
             if facts.heartPct >= 1 { flawlessWins += 1 }
-            if facts.castlePct < 0.3 { comebackWins += 1 }
+            if facts.castlePct < 0.5 { comebackWins += 1 }
         }
         r.gauntletNewBest = toppled > gauntletBest
         gauntletBest = max(gauntletBest, toppled)

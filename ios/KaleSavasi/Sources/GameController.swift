@@ -53,6 +53,8 @@ struct Pull: Equatable {
 
 struct OverInfo: Equatable {
     var title: String
+    /// This device's player won (true) or lost (false); nil when nobody here won or lost, as in pass-and-play.
+    var won: Bool? = nil
     var detail: String
     var waiting = false
     var stats: MatchStats?
@@ -213,7 +215,7 @@ final class GameController: NSObject, ObservableObject {
     private let autoPlay = ProcessInfo.processInfo.arguments.contains("-autoPlay") || ProcessInfo.processInfo.arguments.contains("-balance")
     /// "-balance": the computer plays itself on every ready-made castle, fast, and logs how long each match lasts.
     private let balance = ProcessInfo.processInfo.arguments.contains("-balance")
-    private var balanceRun = (preset: 0, game: 0, log: [String]())
+    private var balanceRun = (preset: 0, game: 0, log: [String](), crumbled: Set<Int>())
     #else
     private let autoPlay = false
     private let balance = false
@@ -245,10 +247,16 @@ final class GameController: NSObject, ObservableObject {
         if args.contains("-autoNearby") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.playOnline(.nearby) }
         }
+        // "-autoParty host|join": a nearby four-castle match; the host starts once someone joins.
+        if let i = args.firstIndex(of: "-autoParty"), i + 1 < args.count {
+            let kind: OnlineKind = args[i + 1] == "host" ? .partyHost : .partyJoin
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.playOnline(kind) }
+        }
         builderLaunchHooks()
         // "-demoMatch" starts a quick match at launch, "-party" a four-castle one, "-siege" the daily siege,
         // "-stage N" a campaign stage, "-gauntlet" a gauntlet run.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+        let starts = balance || ["-demoMatch", "-party", "-siege", "-gauntlet", "-stage", "-inspect"].contains(where: args.contains)
+        if starts { DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
             guard let self else { return }
             self.profile.seenHowTo = true
             self.panel = .home
@@ -263,7 +271,7 @@ final class GameController: NSObject, ObservableObject {
             }
             // "-inspect" swings the camera round to the enemy castle.
             if args.contains("-inspect") { DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.toggleInspect() } }
-        }
+        } }
         #endif
     }
 
@@ -734,6 +742,15 @@ final class GameController: NSObject, ObservableObject {
             world.adopt(battle.snapshots, blend: 0.5)
             world.showRepair(side: res.shooter, bricks: out.repaired)
         }
+        #if DEBUG
+        for i in out.damage.indices where out.damage[i].crumbled { balanceRun.crumbled.insert(i) }
+        #endif
+        if out.damage.contains(where: { $0.crumbled }) {
+            // The heart of a castle that fell too far goes with it.
+            world.adopt(battle.snapshots, blend: 0.3)
+            sfx.play(.iceBreak)
+            shake = 1.0
+        }
         let any = out.damage.contains { $0.hit }
         // The enemy this shot hurt most, hearts first; with none hurt, the one it was aimed at.
         let foes = battle.castles.indices.filter { $0 != f.side }
@@ -763,7 +780,7 @@ final class GameController: NSObject, ObservableObject {
             } else if out.damage[f.side].lost > 0.002 { msg = Tx.ownCastle }
             if dealt == 0, !out.damage[enemy].crack.isEmpty { msg = Tx.stoneCracked }
             if !out.damage[enemy].decoys.isEmpty { msg = Tx.decoyFound + "  ·  " + msg }
-            if out.damage[enemy].heart > 0 { msg = (battle.castles[enemy].heartLost ? Tx.heartBroken : Tx.heartHit) + "  ·  " + msg }
+            if out.damage[enemy].heart > 0 { msg = (out.damage[enemy].crumbled ? Tx.castleCrumbled : battle.castles[enemy].heartLost ? Tx.heartBroken : Tx.heartHit) + "  ·  " + msg }
             else if out.damage[f.side].heart > 0 { msg = Tx.ownHeart }
             if out.shieldBroken != nil { msg = Tx.shieldBroken + "  ·  " + msg }
             if out.aegis != nil { msg = Tx.aegisUp + "  ·  " + msg }
@@ -900,7 +917,7 @@ final class GameController: NSObject, ObservableObject {
             #if DEBUG
             // Unattended gauntlet runs go straight on to the next castle.
             // Unattended online runs ask for a rematch.
-            if self.autoPlay, (self.mode == .gauntlet && info.gauntletNext) || self.mode == .online {
+            if self.autoPlay, (self.mode == .gauntlet && info.gauntletNext) || self.mode == .online || (self.mode == .party && self.isHost && self.net != nil) {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in if self?.screen == .over { self?.rematch() } }
             }
             #endif
@@ -918,7 +935,7 @@ final class GameController: NSObject, ObservableObject {
         updated.save()
         profile = updated
         sfx.play(.win)
-        var info = OverInfo(title: cleared ? Tx.siegeCleared : Tx.siegeOver, detail: Tx.siegeScore(score) + (cleared ? "  ·  " + Tx.clearBonus(clearBonus) : ""))
+        var info = OverInfo(title: cleared ? Tx.siegeCleared : Tx.siegeOver, won: cleared ? true : nil, detail: Tx.siegeScore(score) + (cleared ? "  ·  " + Tx.clearBonus(clearBonus) : ""))
         info.stats = stats[0]
         info.reward = reward
         info.isSiege = true
@@ -934,7 +951,7 @@ final class GameController: NSObject, ObservableObject {
         if mode == .party {
             if winner == me { bookParty(place: 1) }
             let order = ([winner] + outOrder.reversed()).filter { $0 >= 0 && $0 < nm.count }
-            var info = OverInfo(title: winner == me ? Tx.won : Tx.sideWon(nm[winner]), detail: Tx.placements(order.map { nm[$0] }))
+            var info = OverInfo(title: winner == me ? Tx.won : Tx.sideWon(nm[winner]), won: winner == me, detail: Tx.placements(order.map { nm[$0] }))
             info.reward = partyReward
             info.stats = stats[me]
             sfx.play(winner == me ? .win : .lose)
@@ -946,6 +963,7 @@ final class GameController: NSObject, ObservableObject {
         if let mine = mySide {
             let won = winner == mine
             info.title = won ? Tx.won : Tx.lost
+            info.won = won
             sfx.play(won ? .win : .lose)
             var updated = profile
             let own = battle.castles[mine]
@@ -1026,7 +1044,8 @@ final class GameController: NSObject, ObservableObject {
     private func logBalance(winner: Int) {
         let loser = 1 - winner, c = battle.castles[loser]
         var cause = "-"
-        if let h = c.heartIndex { cause = c.snap.poses[h].broken ? "broken" : c.crystalGone(h) ? "knocked" : "floor" }
+        if let h = c.heartIndex { cause = balanceRun.crumbled.contains(loser) ? "floor" : c.snap.poses[h].broken ? "broken" : "knocked" }
+        balanceRun.crumbled = []
         let classicSide = balanceRun.game % 2
         let line = String(format: "BALANCE game=%d preset=%d classicSide=%d first=%d winner=%d presetWon=%d shots=%d cause=%@ pct=%.2f/%.2f", balanceRun.game, balanceRun.preset,
                           classicSide, battle.first, winner, winner != classicSide ? 1 : 0, battle.shot + 1, cause, battle.castles[0].pct, battle.castles[1].pct)
@@ -1199,6 +1218,11 @@ final class GameController: NSObject, ObservableObject {
         if lobby.kind == .partyHost {
             lobby.canStart = !partyPeers.isEmpty
             lobby.busy = partyPeers.isEmpty
+            #if DEBUG
+            if lobby.canStart, ProcessInfo.processInfo.arguments.contains("-autoParty") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in if self?.screen == .lobby { self?.startPartyNow() } }
+            }
+            #endif
         } else if net.peerCount > 0, partyPeers.count >= net.peerCount {
             isHost = partyPeers.keys.allSatisfy { $0 < myNonce }
             if isHost && round == 0 { hostParty() }
@@ -1267,7 +1291,7 @@ final class GameController: NSObject, ObservableObject {
         guard mode == .party, phase != .over else { return }
         hostNonce = 0
         enterOverState(lookingAt: me)
-        var info = OverInfo(title: Tx.gameOver, detail: Tx.hostLeft)
+        var info = OverInfo(title: Tx.gameOver, won: false, detail: Tx.hostLeft)
         info.reward = partyReward
         present(info)
     }

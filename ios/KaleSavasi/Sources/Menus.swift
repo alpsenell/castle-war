@@ -820,13 +820,7 @@ struct CompareTable: View {
 private enum Outcome { case win, loss, neutral }
 
 private extension OverInfo {
-    /// Read from what the card says, since a draw-free match only ever ends one of these ways.
-    var outcome: Outcome {
-        if title == Tx.won || title == Tx.siegeCleared || (reward?.stars ?? 0) > 0 || hasNextStage || gauntletNext { return .win }
-        if title == Tx.lost || title == Tx.gauntletOver || title == Tx.gameOver { return .loss }
-        if reward != nil && !isSiege { return .loss }
-        return .neutral
-    }
+    var outcome: Outcome { won.map { $0 ? .win : .loss } ?? .neutral }
 }
 
 /// Three stars popping in one after another, the middle one raised.

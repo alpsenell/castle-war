@@ -313,15 +313,18 @@ enum Tx {
         [
             ("hand.draw.fill", p("Ekrana dokun, geri çek ve bırak. Çekiş uzunluğu gücü, sağa sola çekmek yönü belirler.", "Touch the screen, pull back and release. Pull length sets power; pulling sideways turns the cannon.")),
             ("wind", p("Rüzgâr her tur değişir. Üstteki ok gülleyi ittiği yönü gösterir.", "Wind changes every turn. The arrow at the top shows which way it pushes the shot.")),
-            ("scope", p("Altın hedefin yakınına isabet kritik vuruştur: patlama büyür.", "A hit near the gold target is a critical: the blast grows.")),
+            ("scope", p("Altın hedefin yakınına isabet kritik vuruştur: gülle daha sert çarpar.", "A hit near the gold target is a critical: the ball strikes harder.")),
             ("bolt.fill", p("Hasar verdikçe MEGA dolar. Dolunca düğmeye bas, dev bir atış yap.", "Dealing damage fills MEGA. When it is full, tap the button for a giant shot.")),
             ("circle.grid.cross.fill", p("Her maçta üç özel güllen var: Saçma, Delici, Güdümlü.", "You carry three special shots per match: Cluster, Piercer, Homing.")),
             ("balloon.fill", p("Balonun içinden atış geçirirsen ödülü kaparsın: onarım, kalkan ya da mega şarj.", "Shoot through a balloon to grab its prize: repair, shield or mega charge.")),
-            ("heart.fill", p("Her kalenin bir kalbi var. Rakibin kalbini kıran kazanır.", "Every castle guards a heart. Shatter the enemy heart to win.")),
-            ("building.columns.fill", p("Kaleni kendin kur: kalbi duvarların, kulelerin arkasına sakla.", "Build your own castle: hide the heart behind walls and towers.")),
+            ("heart.fill", p("Her kalenin bir kalbi var. Kalp kırılınca, yerinden fırlayınca ya da kalenin üçte ikisi yıkılınca düşer. Rakibin kalbini düşüren kazanır.",
+                             "Every castle guards a heart. It falls when it shatters, when it is knocked off its spot, or when two thirds of the castle are down. Bring down the enemy heart to win.")),
+            ("square.stack.3d.down.right.fill", p("Tuğlalar gerçekten devrilip düşer: bir kulenin altını oyarsan üstü de yıkılır.", "Bricks topple and fall for real: knock out what holds a tower up and the rest comes down.")),
+            ("building.columns.fill", p("Kaleni tuğla tuğla kendin kur ve yerçekimini dene: kalbi duvarların, kulelerin arkasına sakla.", "Build your own castle brick by brick and test it under gravity: hide the heart behind walls and towers.")),
             ("flame.fill", p("Fetih Yolu'nda kalen düşene kadar sırayla kaleler gelir. Başarımlar ve kalp türleri seni bekliyor.", "In the Gauntlet, castles keep coming until yours falls. Achievements and heart types wait for you.")),
             ("person.3.fill", p("Dört kale modunda herkes kendi için oynar: hedef düğmeleriyle saldıracağın kaleyi seç.", "In Four castles it is every castle for itself: pick which castle to attack with the target buttons.")),
-            ("shield.lefthalf.filled", p("Sundurma kalbi yukarıdan korur, demir duvar iki darbe alır, hendek gülleyi yutar. Sahte kalplerle rakibi şaşırt.", "A shelter roofs the heart, iron walls take two blasts, moats swallow shots. Decoy hearts fool the enemy.")),
+            ("shield.lefthalf.filled", p("Taş ağır ve sağlam, ahşap hafif ve ucuz, buz kırılgan; demir iki darbe alır. Hendek gülleyi yutar, sahte kalpler rakibi şaşırtır.",
+                                         "Stone is heavy and tough, wood light and cheap, ice brittle; iron takes two hits. Moats swallow shots and decoy hearts fool the enemy.")),
         ]
     }
     static var quitTitle: String { p("Maçtan çıkılsın mı?", "Leave the match?") }
@@ -432,7 +435,7 @@ enum Tx {
         case .sniper: return p("25 kritik vuruş yap", "Land 25 critical hits")
         case .mega: return p("10 mega atış yap", "Fire 10 mega shots")
         case .flawless: return p("Kalbin hiç çatlamadan kazan", "Win without a crack in your heart")
-        case .comeback: return p("Kalenin %30'u kalmışken kazan", "Win with under 30% of your castle standing")
+        case .comeback: return p("Kalenin yarısından azı ayaktayken kazan", "Win with under half of your castle standing")
         case .trickster: return p("Rakip 3 sahte kalbini kırsın", "Let the enemy break 3 of your decoys")
         case .gauntlet5: return p("Bir seferde 5 kale yık", "Topple 5 castles in one gauntlet run")
         case .gauntlet10: return p("Bir seferde 10 kale yık", "Topple 10 castles in one gauntlet run")
@@ -585,4 +588,6 @@ enum Tx {
     static var players: String { p("Oyuncular", "Players") }
     // MARK: 2.0 physics
     static var settling: String { p("Taşlar düşüyor…", "Bricks falling…") }
+    // MARK: 2.0 integration
+    static var castleCrumbled: String { p("Kale çöktü, kalp de düştü!", "The castle crumbled and took its heart down!") }
 }

@@ -240,7 +240,7 @@ struct SeatPlate: View {
         .opacity(out ? 0.55 : 1)
         .animation(.easeOut(duration: 0.6), value: heart)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Tx.health(name, Int((heart * 100).rounded(.up)), Int((pct * 100).rounded(.down))))
+        .accessibilityLabel(Tx.health(name, min(100, Int((heart * 100 - 1e-9).rounded(.up))), Int((pct * 100 + 1e-9).rounded(.down))))
     }
 }
 
@@ -719,7 +719,7 @@ enum DebugJump {
         case "lobby":
             game.lobby = Lobby(kind: .partyHost, status: Tx.hostWaiting, busy: true, players: 2, canStart: true)
             game.screen = .lobby
-        case "builder": game.openBuilder()
+        case "builder": break       // opened by `GameController.builderLaunchHooks`
         case _ where s.hasPrefix("over-"):
             game.playComputer()
             later(1.5) { game.over = sampleOver(String(s.dropFirst(5))); game.screen = .over }
@@ -734,21 +734,21 @@ enum DebugJump {
         var o: OverInfo
         switch kind {
         case "loss":
-            o = OverInfo(title: Tx.lost, detail: Tx.heartFell(Tx.you) + " " + Tx.standing(Tx.you, 34, Tx.computer, 71))
+            o = OverInfo(title: Tx.lost, won: false, detail: Tx.heartFell(Tx.you) + " " + Tx.standing(Tx.you, 34, Tx.computer, 71))
             r = Reward(xp: 45, trophies: -12, levelBefore: 5, levelAfter: 5, progressBefore: 0.2, progressAfter: 0.32)
             r.totalTrophies = 224
         case "siege":
-            o = OverInfo(title: Tx.siegeCleared, detail: Tx.siegeScore(2350) + "  ·  " + Tx.clearBonus(500))
+            o = OverInfo(title: Tx.siegeCleared, won: true, detail: Tx.siegeScore(2350) + "  ·  " + Tx.clearBonus(500))
             o.isSiege = true
             r.siegeBest = 2350; r.siegeRecord = 3120; r.siegeNewBest = true; r.siegeFirstToday = true
         case "party":
-            o = OverInfo(title: Tx.won, detail: Tx.placements([Tx.you, Tx.seatName(2), Tx.seatName(1), Tx.seatName(3)]))
+            o = OverInfo(title: Tx.won, won: true, detail: Tx.placements([Tx.you, Tx.seatName(2), Tx.seatName(1), Tx.seatName(3)]))
         case "local":
             o = OverInfo(title: Tx.sideWon(Tx.red), detail: Tx.heartFell(Tx.blue) + " " + Tx.standing(Tx.red, 54, Tx.blue, 22))
             o.stats = mine; o.rivalStats = theirs; o.names = [Tx.red, Tx.blue]
             return o
         default:
-            o = OverInfo(title: Tx.stageWon(3), detail: Tx.heartFell(Tx.computer) + " " + Tx.standing(Tx.you, 82, Tx.computer, 31))
+            o = OverInfo(title: Tx.stageWon(3), won: true, detail: Tx.heartFell(Tx.computer) + " " + Tx.standing(Tx.you, 82, Tx.computer, 31))
             o.hasNextStage = true
             r.stars = 3
             r.achievements = [.firstWin, .sniper]

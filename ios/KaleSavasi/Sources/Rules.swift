@@ -26,7 +26,8 @@ enum K {
     static let pickupRange = 2.8                     // how close a shot must pass to grab a balloon
     static let shieldFactor = 0.6                    // impulses against a shielded castle
     static let homeReach = 0.6                       // a brick further than this from home no longer counts as standing
-    static let heartReach = 1.5                      // a heart or decoy knocked further than this is lost
+    static let heartReach = 3.0                      // a heart or decoy knocked further than this is lost
+    static let heartFloor = 1.0 / 3                  // a castle standing below this share loses its heart
     static let upright = 0.9                         // cosine of the tilt a standing brick may have
     static let repairShare = 0.12                    // share of a castle's mass a repair balloon puts back
     static let settleSeconds = 6.0                   // longest a shot's physics may run
@@ -74,6 +75,8 @@ struct Damage {
     var crack: [Int] = []
     /// Decoy hearts this shot gave away, as indices into `Castle.decoys`.
     var decoys: [Int] = []
+    /// So little of the castle stands that its heart fell with it.
+    var crumbled = false
     var hit: Bool { lost > 0.002 || !broken.isEmpty || moved > 0 || !crack.isEmpty || heart > 0 }
 }
 
@@ -427,12 +430,21 @@ final class Castle {
             else if !b.broken && b.hp < a.hp { out.crack.append(i) }
             else if wasHome[i] && !b.broken && !isHome(i) { out.moved += 1 }
         }
-        if let h = heartIndex, !heartGone, crystalGone(h) { heartGone = true }
+        refresh()
+        // The heart is lost when it breaks, is knocked off its spot, or most of the castle is down.
+        if let h = heartIndex, !heartGone {
+            if crystalGone(h) { heartGone = true }
+            else if pct < K.heartFloor {
+                heartGone = true
+                out.crumbled = true
+                snap.poses[h].hp = 0
+                refresh()
+            }
+        }
         for k in decoys.indices where !decoyRevealed[k] && crystalGone(decoys[k]) {
             decoyRevealed[k] = true
             out.decoys.append(k)
         }
-        refresh()
         out.lost = max(0, beforePct - pct)
         out.heart = max(0, beforeHeart - heartPct)
         return out
