@@ -111,7 +111,8 @@ final class Store: ObservableObject {
     func refreshEntitlements(keeping justBought: String? = nil) async {
         var ids = await Store.currentEntitlements()
         if let justBought { ids.insert(justBought) }
-        await MainActor.run { self.apply(ids) }
+        let found = ids
+        await MainActor.run { self.apply(found) }
     }
 
     @MainActor

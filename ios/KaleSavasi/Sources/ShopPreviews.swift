@@ -117,20 +117,23 @@ struct CastlePreview: View {
     let skin: Skin
     var gem: HeartGem = .none
     var banner: Banner = .none
+    var renderSize = CGSize(width: 360, height: 240)
     @State private var image: UIImage?
     var body: some View {
-        ZStack {
-            if let image {
-                Image(uiImage: image).resizable().scaledToFill()
-            } else {
-                LinearGradient(colors: [Color(hex: 0x6fb6ef), Color(hex: 0xf3e3c0)], startPoint: .top, endPoint: .bottom)
-                ProgressView().tint(Theme.woodDark)
+        // The image fills whatever room it is given, without asking for more.
+        LinearGradient(colors: [Color(hex: 0x6fb6ef), Color(hex: 0xf3e3c0)], startPoint: .top, endPoint: .bottom)
+            .overlay {
+                if let image {
+                    Image(uiImage: image).resizable().scaledToFill()
+                } else {
+                    ProgressView().tint(Theme.woodDark)
+                }
             }
-        }
+            .clipped()
         .task(id: "\(skin.rawValue)\(gem.rawValue)\(banner.rawValue)") {
             // Let the card appear first; the render takes a moment the first time.
             try? await Task.sleep(nanoseconds: 60_000_000)
-            image = ShopPreviews.castle(skin, gem: gem, banner: banner)
+            image = ShopPreviews.castle(skin, gem: gem, banner: banner, size: renderSize)
         }
     }
 }

@@ -214,15 +214,17 @@ private struct FeaturedTab: View {
     let height: CGFloat
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 16.u, style: .continuous)
+        GeometryReader { g in
+        let pw = min(height * 1.35, g.size.width * 0.56), ph = height - 24.u
         HStack(spacing: 14.u) {
             ZStack(alignment: .topLeading) {
-                CastlePreview(skin: .royal, gem: .amethyst, banner: .lion)
-                    .frame(maxWidth: height * 1.35, maxHeight: height - 24.u)
+                CastlePreview(skin: .royal, gem: .amethyst, banner: .lion, renderSize: CGSize(width: 720, height: 480))
+                    .frame(width: pw, height: ph)
                     .clipShape(shape)
                     .overlay(shape.strokeBorder(Theme.goldDark, lineWidth: 3))
                     .overlay(shape.inset(by: 3).strokeBorder(Theme.goldLight.opacity(0.7), lineWidth: 1.5))
                 TrailPreview(trail: .royal)
-                    .frame(width: height * 0.62, height: height * 0.36)
+                    .frame(width: pw * 0.46, height: ph * 0.38)
                     .clipShape(RoundedRectangle(cornerRadius: 10.u, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 10.u, style: .continuous).strokeBorder(Theme.goldDark, lineWidth: 2))
                     .padding(8.u)
@@ -233,7 +235,7 @@ private struct FeaturedTab: View {
                     .rotationEffect(.degrees(-6))
                     .padding(10.u)
             }
-            .frame(maxWidth: height * 1.35, maxHeight: height - 24.u)
+            .frame(width: pw, height: ph)
             VStack(alignment: .leading, spacing: 7.u) {
                 HStack(spacing: 8.u) {
                     CrownBadge(size: 26)
@@ -259,13 +261,13 @@ private struct FeaturedTab: View {
                 BuyButton(item: .supporter, equipped: game.myLook.skin == .royal && game.myLook.trail == .royal,
                           equip: { game.equip(skin: .royal, trail: .royal) }, big: true)
             }
-            .frame(minWidth: 300.u, maxWidth: .infinity, alignment: .leading)
-            .layoutPriority(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(10.u)
         .background {
             shape.fill(LinearGradient(colors: [Theme.purple.opacity(0.22), Theme.goldLight.opacity(0.35)], startPoint: .topLeading, endPoint: .bottomTrailing))
                 .overlay(shape.strokeBorder(Theme.purpleDark.opacity(0.5), lineWidth: 1.5))
+        }
         }
     }
 
