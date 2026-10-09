@@ -31,6 +31,8 @@
 	<array>
 		<string>_kale-savasi._tcp</string>
 		<string>_kale-savasi._udp</string>
+		<string>_kale-savasi4._tcp</string>
+		<string>_kale-savasi4._udp</string>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Yakındaki bir oyuncuyla eşleşmek için yerel ağ kullanılır.</string>
