@@ -135,6 +135,9 @@ struct TileFace: View {
             Sunburst().fill(Color.white.opacity(0.13)).frame(width: 260.u, height: 260.u).offset(y: -16.u)
         }
         .clipShape(RoundedRectangle(cornerRadius: 16.u, style: .continuous))
+        // Clipping only hides the oversized sunburst; without this its whole square still takes
+        // touches, so tiles drawn later stole taps meant for their neighbours.
+        .contentShape(RoundedRectangle(cornerRadius: 16.u, style: .continuous))
     }
 }
 
