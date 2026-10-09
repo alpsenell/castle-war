@@ -217,7 +217,7 @@ private struct FeaturedTab: View {
         HStack(spacing: 14.u) {
             ZStack(alignment: .topLeading) {
                 CastlePreview(skin: .royal, gem: .amethyst, banner: .lion)
-                    .frame(width: height * 1.35, height: height - 24.u)
+                    .frame(maxWidth: height * 1.35, maxHeight: height - 24.u)
                     .clipShape(shape)
                     .overlay(shape.strokeBorder(Theme.goldDark, lineWidth: 3))
                     .overlay(shape.inset(by: 3).strokeBorder(Theme.goldLight.opacity(0.7), lineWidth: 1.5))
@@ -233,7 +233,7 @@ private struct FeaturedTab: View {
                     .rotationEffect(.degrees(-6))
                     .padding(10.u)
             }
-            .frame(width: height * 1.35, height: height - 24.u)
+            .frame(maxWidth: height * 1.35, maxHeight: height - 24.u)
             VStack(alignment: .leading, spacing: 7.u) {
                 HStack(spacing: 8.u) {
                     CrownBadge(size: 26)
@@ -259,7 +259,8 @@ private struct FeaturedTab: View {
                 BuyButton(item: .supporter, equipped: game.myLook.skin == .royal && game.myLook.trail == .royal,
                           equip: { game.equip(skin: .royal, trail: .royal) }, big: true)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(minWidth: 300.u, maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(1)
         }
         .padding(10.u)
         .background {

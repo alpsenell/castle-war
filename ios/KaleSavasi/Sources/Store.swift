@@ -106,8 +106,11 @@ final class Store: ObservableObject {
         return ids
     }
 
-    func refreshEntitlements() async {
-        let ids = await Store.currentEntitlements()
+    /// Re-reads the entitlements. `keeping` is a product just bought with a verified transaction,
+    /// kept even if `currentEntitlements` has not caught up with it yet.
+    func refreshEntitlements(keeping justBought: String? = nil) async {
+        var ids = await Store.currentEntitlements()
+        if let justBought { ids.insert(justBought) }
         await MainActor.run { self.apply(ids) }
     }
 
@@ -140,7 +143,7 @@ final class Store: ObservableObject {
                 switch verification {
                 case .verified(let t):
                     await t.finish()
-                    await refreshEntitlements()
+                    await refreshEntitlements(keeping: t.revocationDate == nil ? t.productID : nil)
                     notice = .purchased(id)
                     return .purchased
                 case .unverified(_, let error):

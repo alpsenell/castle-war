@@ -23,6 +23,15 @@ final class StoreTests: XCTestCase {
 
     private func makeStore() -> Store { Store(defaults: defaults, ownAll: false) }
 
+    /// `currentEntitlements` catches up with the test session a moment after a purchase or refund.
+    private func waitUntil(_ what: String, file: StaticString = #filePath, line: UInt = #line, _ condition: () async -> Bool) async {
+        let deadline = Date().addingTimeInterval(10)
+        while await !condition() {
+            if Date() > deadline { XCTFail("timed out waiting for \(what)", file: file, line: line); return }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+    }
+
     func testAllProductsLoadWithPrices() async {
         let store = makeStore()
         await store.loadProducts()
@@ -52,30 +61,34 @@ final class StoreTests: XCTestCase {
         // A fresh store (an offline relaunch) starts from the cache, then entitlements.
         let relaunch = makeStore()
         XCTAssertTrue(relaunch.owns(Catalog.gold))
-        await relaunch.refreshEntitlements()
-        XCTAssertTrue(relaunch.owns(Catalog.gold))
+        await waitUntil("the entitlement") { await relaunch.refreshEntitlements(); return relaunch.owns(Catalog.gold) }
     }
 
     func testRefundRevokesEntitlement() async throws {
         let store = makeStore()
         await store.loadProducts()
-        XCTAssertEqual(await store.buy(Catalog.rainbow), .purchased)
+        let bought = await store.buy(Catalog.rainbow)
+        XCTAssertEqual(bought, .purchased)
         XCTAssertTrue(store.owns(Catalog.rainbow))
         let t = try XCTUnwrap(session.allTransactions().first { $0.productIdentifier == Catalog.rainbow })
+        await waitUntil("the purchase to reach the entitlements") { await Store.currentEntitlements().contains(Catalog.rainbow) }
         try session.refundTransaction(identifier: t.identifier)
-        await store.refreshEntitlements()
-        XCTAssertFalse(store.owns(Catalog.rainbow))
+        await waitUntil("the refund") { await store.refreshEntitlements(); return !store.owns(Catalog.rainbow) }
         // The cache follows the entitlements, so a relaunch does not bring it back.
         XCTAssertFalse(makeStore().owns(Catalog.rainbow))
     }
 
-    func testRestoreKeepsWhatIsOwned() async {
+    /// `AppStore.sync()` asks for an Apple Account sign-in even under StoreKitTest, so the restore
+    /// path is checked up to the entitlement read it relies on: a relaunch with an empty cache
+    /// still finds the Supporter Pack.
+    func testEntitlementsRestoreWithoutCache() async {
         let store = makeStore()
         await store.loadProducts()
-        XCTAssertEqual(await store.buy(Catalog.supporter), .purchased)
-        await store.restore()
-        XCTAssertTrue(store.owns(Catalog.supporter))
-        XCTAssertNotNil(store.notice)
+        let bought = await store.buy(Catalog.supporter)
+        XCTAssertEqual(bought, .purchased)
+        let fresh = Store(defaults: UserDefaults(suiteName: "store-tests-empty-\(UUID().uuidString)")!, ownAll: false)
+        XCTAssertFalse(fresh.owns(Catalog.supporter))
+        await waitUntil("the restored entitlement") { await fresh.refreshEntitlements(); return fresh.owns(Catalog.supporter) }
     }
 
     func testCosmeticsFollowOwnership() {

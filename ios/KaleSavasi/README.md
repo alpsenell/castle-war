@@ -217,6 +217,46 @@ When the player is signed in to Game Center, trophies go to the leaderboard
 created in App Store Connect; the daily one should be a recurring leaderboard that resets
 every day.
 
+## Shop
+
+Everything for sale is a one-time, non-consumable cosmetic. Nothing in the shop changes the
+rules or the physics: skins swap brick materials but not their meshes or bodies, trails and the
+fireworks are particles without bodies, and `K.rulesVersion` is unchanged, so players with and
+without cosmetics play the same online matches.
+
+| Product ID (`com.alpsenel.kalesavasi.` …) | Item | Price |
+| --- | --- | --- |
+| `skin.gold`, `skin.obsidian` | Gold Castle, Obsidian skins | $2.99 each |
+| `skin.marble`, `skin.candy` | Marble, Candy skins | $1.99 each |
+| `trail.rainbow`, `trail.lightning`, `trail.starfall` | Cannonball trails | $0.99 each |
+| `impact.fireworks` | Fireworks on impact, on top of the dust | $0.99 |
+| `pack.hearts` | Heart gems: Emerald, Sapphire, Amethyst, Sunfire | $1.99 |
+| `pack.banners` | Flag crests: Lion, Dragon, Eagle, Wolf | $0.99 |
+| `supporter` | Royal skin and trail, a crown on name plates, all four banners | $4.99 |
+
+- **Skins** re-theme the owner's bricks, fragments and dust while wood, stone, ice and iron stay
+  easy to tell apart (grain, blocks, glass and riveted plate). They apply to the player's own
+  castle in every mode and in the builder; computer castles stay classic.
+- **Trails** replace the trail of a standard (and mega) shot; cluster, piercer and homing shots
+  keep their own, since they tell the other player what is coming. Level-unlocked ball colours
+  stay as they are.
+- **Heart gems** recolour the crystal; living, aegis and titan hearts keep their own glow.
+  Decoys always wear the same look as the heart.
+- **Store** (`Sources/Store.swift`): StoreKit 2. Ownership is read only from
+  `Transaction.currentEntitlements` (revoked transactions excluded), cached for an offline
+  launch and always refreshed; `Transaction.updates` is watched for Ask to Buy, refunds and other
+  devices. Restore Purchases runs `AppStore.sync()` and never hides entitlements if it fails.
+- **Online**: the opponent's cosmetics travel as optional `hello` fields (`skin`, `trail`,
+  `impact`, `gem`, `banner`, `supporter`) and four-castle seats as an optional `look`. Older
+  builds ignore them; unknown values fall back to the default look.
+- The shop opens from the menu's Shop button and from the profile (Shop, Appearance). Its My Look
+  tab equips what is owned.
+
+`StoreKit/Products.storekit` holds all eleven products. The scheme uses it when the app is run
+from Xcode, and `Tests/StoreTests.swift` runs against it with StoreKitTest (`xcodebuild test`);
+the debug entitlements add `get-task-allow`, which that needs. A simulator launched with
+`simctl` has no StoreKit configuration, so debug builds then show the list prices.
+
 ## Modes
 
 | Mode | How it connects |
@@ -264,6 +304,11 @@ switched from the main menu. The app name on the Home Screen is localized throug
 | `Sources/Profile.swift` | Level, trophies, leagues, streaks, missions, match rewards and the saved castle |
 | `Sources/Strings.swift` | Turkish and English text |
 | `Sources/Net.swift` | Game Center and nearby transports behind one protocol |
+| `Sources/Cosmetics.swift` | Product IDs, the cosmetics, what is equipped, banner crests |
+| `Sources/Skins.swift` | Brick looks for each castle skin |
+| `Sources/Store.swift` | StoreKit 2 products, purchases, entitlements and restore |
+| `Sources/ShopView.swift`, `Sources/ShopPreviews.swift` | The shop and its previews |
+| `Sources/World+Cosmetics.swift` | Trails and the fireworks impact |
 | `Sources/Sfx.swift` | Synthesized sound effects, a break sound per material |
 | `Tools/make-icon.swift` | Regenerates the app icon |
 
@@ -298,6 +343,11 @@ Debug builds accept launch arguments for unattended testing:
 | `-inspect`, `-knocks` | Swing round to the enemy castle; log every knock in the physics |
 | `-screen builder`, `-demoCastle N`, `-demoGravity` | Opens the builder, loads a demo castle (0 is a showcase), runs Test gravity |
 | `-screen …`, `-panel …` | Jumps to a screen or menu panel for screenshots |
+| `-panel shop`, `-shopTab featured\|skins\|trails\|hearts\|look` | Opens the shop on a tab |
+| `-ownAll` | Pretends every product is owned |
+| `-skin …`, `-trail …`, `-impact fireworks`, `-heartGem …`, `-banner …` | Equips a cosmetic for this launch (shown only if owned, so pair with `-ownAll`) |
+| `-localMatch`, `-standardAmmo` | Starts pass-and-play (both castles wear the player's cosmetics); unattended turns fire plain balls |
+| `-storeBuy <id>` | Starts that purchase at launch and logs the outcome |
 
 ## Tuning
 

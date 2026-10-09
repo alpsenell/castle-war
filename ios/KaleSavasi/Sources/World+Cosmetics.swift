@@ -32,14 +32,15 @@ extension World {
             band.particleColor = UIColor(white: 1, alpha: 0.85)
             band.blendMode = .alpha
             let spectrum = CAKeyframeAnimation()
-            spectrum.values = Trail.rainbow.colors.map { UIColor(hex: $0) }
-            spectrum.keyTimes = (0..<6).map { NSNumber(value: Double($0) / 5) }
+            // The whole spectrum within the first part of a puff's life, so it shows close behind the ball.
+            spectrum.values = (Trail.rainbow.colors + [Trail.rainbow.colors[5]]).map { UIColor(hex: $0) }
+            spectrum.keyTimes = (0..<6).map { NSNumber(value: Double($0) / 5 * 0.42) } + [1]
             band.propertyControllers = [.opacity: curve([1, 1, 0.8, 0], [0, 0.45, 0.8, 1]), .color: SCNParticlePropertyController(animation: spectrum)]
             let core = base(Textures.puff, rate: 60, life: 0.2, size: 0.4)
             core.particleColor = UIColor(white: 1, alpha: 0.9)
             return [band, core]
         case .lightning:
-            let glow = base(Textures.puff, rate: 90, life: 0.35, size: 0.7)
+            let glow = base(Textures.puff, rate: 90, life: 0.35, size: 0.45)
             glow.particleColor = UIColor(hex: 0x8fd0ff, alpha: 0.9)
             let sparks = base(Textures.puff, rate: 260, life: 0.22, size: 0.16)
             sparks.particleColor = UIColor(hex: 0xe8f6ff)
@@ -49,8 +50,8 @@ extension World {
             sparks.stretchFactor = 0.09
             // A flicker: sparks blink on and off as they fly.
             sparks.propertyControllers = [.opacity: curve([1, 0.15, 1, 0.3, 0.9, 0], [0, 0.18, 0.36, 0.55, 0.75, 1])]
-            let arcs = base(Textures.puff, rate: 40, life: 0.12, size: 1.3)
-            arcs.particleColor = UIColor(hex: 0x5fb8ff, alpha: 0.7)
+            let arcs = base(Textures.puff, rate: 40, life: 0.12, size: 0.8)
+            arcs.particleColor = UIColor(hex: 0x5fb8ff, alpha: 0.45)
             arcs.particleVelocity = 2
             arcs.spreadingAngle = 180
             return [glow, sparks, arcs]
@@ -91,15 +92,15 @@ extension World {
         let pick = palette.shuffled(using: &rng)
         for i in 0..<4 {
             let delay = 0.08 + Double(i) * 0.22
-            let at = p + SIMD3(Float.random(in: -3.5...3.5), Float.random(in: 5.5...9.5), Float.random(in: -3.5...3.5))
+            let at = p + SIMD3(Float.random(in: -3.5...3.5), Float.random(in: 3.5...6.5), Float.random(in: -3.5...3.5))
             let colors = pick[i % pick.count]
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 guard let self else { return }
                 // The shell's climb, then the burst, its glitter falling, and a pop of light.
-                self.burst(at: p + SIMD3(0, 0.6, 0), colors: [0xfff2b0], count: 18, speed: at.y - p.y > 7 ? 15 : 12, life: 0.35, size: 0.3,
+                self.burst(at: p + SIMD3(0, 0.6, 0), colors: [0xfff2b0], count: 18, speed: at.y - p.y > 5 ? 13 : 10, life: 0.35, size: 0.3,
                            accel: -4, cone: true, direction: simd_normalize(at - p), additive: true)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    self.burst(at: at, colors: colors, count: 150, speed: 15, life: 1.2, size: 0.55, accel: -5, cone: false, additive: true)
+                    self.burst(at: at, colors: colors, count: 240, speed: 17, life: 1.4, size: 0.75, accel: -5, cone: false, additive: true)
                     self.burst(at: at, colors: [0xffffff], count: 40, speed: 6, life: 1.6, size: 0.3, accel: -7, cone: false, additive: true)
                     self.flash(at: at, strength: 1400)
                 }

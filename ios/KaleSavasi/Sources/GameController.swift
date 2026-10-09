@@ -686,6 +686,10 @@ final class GameController: NSObject, ObservableObject {
         let c = Computer.choose(battle: battle, side: s, difficulty: difficulty, wind: wind)
         megaArmed = c.mega
         ammo = c.ammo
+        #if DEBUG
+        // "-standardAmmo": unattended turns fire plain balls, so a shop trail shows on every shot.
+        if driverOf(s) == .human, ProcessInfo.processInfo.arguments.contains("-standardAmmo") { megaArmed = false; ammo = .standard }
+        #endif
         plan = (0, aims[s], c.aim)
     }
 

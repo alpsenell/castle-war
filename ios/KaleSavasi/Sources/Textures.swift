@@ -293,7 +293,7 @@ enum Textures {
         func u(_ i: Int) -> Float { Float(i) / Float(n) }
         return image(n, n) { x, y in
             let c = web.value(u(x), u(y)), h = heat.value(u(x), u(y))
-            let crack = max(0, 1 - (c.f2 - c.f1) * 30) * max(0, h * 1.6 - 0.45)
+            let crack = min(1, max(0, 1 - (c.f2 - c.f1) * 16) * max(0, h * 1.8 - 0.25) * 1.4)
             return (crack * 1.0, crack * 0.36, crack * 0.06)
         }
     }()

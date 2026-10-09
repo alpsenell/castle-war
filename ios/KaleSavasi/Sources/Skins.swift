@@ -120,8 +120,8 @@ extension BrickGeometry {
                 mat.emission.wrapS = .repeat; mat.emission.wrapT = .repeat; mat.emission.mipFilter = .linear
                 mat.emission.intensity = 0.9
                 let pulse = CABasicAnimation(keyPath: "intensity")
-                pulse.fromValue = 0.55
-                pulse.toValue = 1.15
+                pulse.fromValue = 1.0
+                pulse.toValue = 1.8
                 pulse.duration = 2.2
                 pulse.autoreverses = true
                 pulse.repeatCount = .infinity

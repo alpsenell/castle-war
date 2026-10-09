@@ -777,7 +777,7 @@ enum DebugJump {
             r.unlockedBall = 1
             r.promotedTo = League.of(236)
         }
-        o.stats = mine; o.rivalStats = theirs; o.names = [Tx.you, Tx.computer]
+        o.stats = mine; o.rivalStats = theirs; o.names = [Tx.you, Tx.computer]; o.crowns = [Store.shared.owns(Catalog.supporter), false]
         o.reward = r
         return o
     }
