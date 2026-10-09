@@ -6,10 +6,12 @@ enum Screen { case menu, lobby, playing, over, builder }
 enum Mode { case ai, local, online, challenge, campaign, gauntlet, party }
 enum OnlineKind { case gameCenter, nearby, partyGameCenter, partyHost, partyJoin }
 /// Which card the menu screen shows.
-enum Panel { case home, profile, settings, howTo, campaign, achievements, party }
+enum Panel { case home, profile, settings, howTo, campaign, achievements, party, shop }
 
 struct HUD: Equatable {
     var names = ["", ""]
+    /// Players with the Supporter Pack wear a crown on their plate.
+    var crowns = [false, false]
     var pct = [1.0, 1.0]
     var heart = [1.0, 1.0]
     var charge = [0.0, 0.0]
@@ -62,6 +64,7 @@ struct OverInfo: Equatable {
     /// Head-to-head: the other side's numbers, both names, and which side is "mine".
     var rivalStats: MatchStats?
     var names: [String] = []
+    var crowns: [Bool] = []
     var side = 0
     var isSiege = false
     /// Campaign: the win opened another stage to move on to.
@@ -112,6 +115,8 @@ final class GameController: NSObject, ObservableObject {
     @Published var profile = Profile.load()
     @Published var language = Tx.lang { didSet { Tx.set(language); refreshHUD() } }
     @Published var confirmQuit = false
+    /// The shop tab showing, and the tab to open it on.
+    @Published var shopTab = ShopTab.featured
     // Castle builder (actions in GameController+Builder.swift)
     @Published var draft = BrickDesign()
     @Published var buildTool = BuildTool.brick
@@ -166,6 +171,8 @@ final class GameController: NSObject, ObservableObject {
     private var score = 0, shotsTaken = 0, clearBonus = 0
     /// Who the online opponent says they are, and the castle they brought.
     private var rival: (name: String, trophies: Int, level: Int, design: BrickDesign)?
+    /// The online opponent's shop cosmetics, from their hello. Only ever drawn.
+    private var rivalLook = Cosmetics.plain
     private var toastWork: DispatchWorkItem?
     // Gauntlet run
     private var gauntletRound = 1
@@ -233,6 +240,14 @@ final class GameController: NSObject, ObservableObject {
         if let i = args.firstIndex(of: "-preset"), i + 1 < args.count, let n = Int(args[i + 1]) {
             presetCastle = Presets.all.indices.contains(n) ? Presets.all[n] : Presets.stages[min(Presets.stages.count - 1, max(0, n - Presets.all.count))]
         }
+        // "-skin gold", "-trail rainbow", "-impact fireworks", "-heartGem emerald", "-banner lion" equip
+        // a cosmetic for this launch (not stored); it shows only if owned, so pair them with "-ownAll".
+        func arg(_ k: String) -> String? { args.firstIndex(of: k).flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } }
+        if let v = arg("-skin") { profile.equipSkin = v }
+        if let v = arg("-trail") { profile.equipTrail = v }
+        if let v = arg("-impact") { profile.equipImpact = v }
+        if let v = arg("-heartGem") { profile.equipGem = v }
+        if let v = arg("-banner") { profile.equipBanner = v }
         #endif
         resetBackdrop()
         world.onSplash = { [weak self] in self?.sfx.play(.splash) }
@@ -255,13 +270,14 @@ final class GameController: NSObject, ObservableObject {
         builderLaunchHooks()
         // "-demoMatch" starts a quick match at launch, "-party" a four-castle one, "-siege" the daily siege,
         // "-stage N" a campaign stage, "-gauntlet" a gauntlet run.
-        let starts = balance || ["-demoMatch", "-party", "-siege", "-gauntlet", "-stage", "-inspect"].contains(where: args.contains)
+        let starts = balance || ["-demoMatch", "-localMatch", "-party", "-siege", "-gauntlet", "-stage", "-inspect"].contains(where: args.contains)
         if starts { DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
             guard let self else { return }
             self.profile.seenHowTo = true
             self.panel = .home
             if self.balance { self.nextBalanceMatch() }
             else if args.contains("-demoMatch") { self.playComputer() }
+            else if args.contains("-localMatch") { self.playLocal() }
             else if args.contains("-party") { self.playParty() }
             else if args.contains("-siege") { self.playSiege() }
             else if args.contains("-gauntlet") { self.playGauntlet() }
@@ -291,6 +307,59 @@ final class GameController: NSObject, ObservableObject {
     func resetBackdrop() {
         let seed = UInt32.random(in: 0...UInt32.max)
         battle = Battle(seed: seed, first: 0, designs: [myCastle, Presets.pick(seed)])
+        world.looks = [myLook, .plain]
+        world.load(battle)
+    }
+
+    // MARK: Cosmetics
+
+    /// This player's shop cosmetics: what is equipped, limited to what StoreKit says is owned.
+    var myLook: Cosmetics { profile.cosmetics(owned: Store.shared.owned) }
+
+    /// What a seat's castle and shots look like. The player's own seats wear their cosmetics,
+    /// online opponents the ones they sent, and computer castles the default look.
+    func cosmetics(for side: Int) -> Cosmetics {
+        switch mode {
+        case .local: return myLook
+        case .online: return side == me ? myLook : rivalLook
+        case .party:
+            if side == me { return myLook }
+            guard seats.indices.contains(side), seats[side].nonce != 0 else { return .plain }
+            return seats[side].look ?? .plain
+        case .ai, .challenge, .campaign, .gauntlet: return side == 0 ? myLook : .plain
+        }
+    }
+
+    /// Equips a cosmetic the player owns; the scene behind the menu shows it straight away.
+    func equip(skin: Skin? = nil, trail: Trail? = nil, impact: ImpactEffect? = nil, gem: HeartGem? = nil, banner: Banner? = nil) {
+        let owned = Store.shared.owned
+        var p = profile
+        if let skin, skin.unlocked(by: owned) { p.equipSkin = skin.rawValue }
+        if let trail, trail.unlocked(by: owned) { p.equipTrail = trail.rawValue }
+        if let impact, impact.unlocked(by: owned) { p.equipImpact = impact.rawValue }
+        if let gem, gem.unlocked(by: owned) { p.equipGem = gem.rawValue }
+        if let banner, banner.unlocked(by: owned) { p.equipBanner = banner.rawValue }
+        guard p != profile else { return }
+        p.save()
+        profile = p
+        sfx.play(.tick)
+        thump(.light)
+        lookChanged()
+    }
+
+    /// Opens the shop on a tab.
+    func openShop(_ tab: ShopTab = .featured) {
+        sfx.play(.tick)
+        shopTab = tab
+        panel = .shop
+    }
+
+    /// Purchases or equipment changed: redraw the player's castle if the menu is showing it.
+    func lookChanged() {
+        guard screen == .menu, phase == .menu else { return }
+        let look = myLook
+        guard world.looks.first != look else { return }
+        world.looks = [look, .plain]
         world.load(battle)
     }
 
@@ -524,6 +593,7 @@ final class GameController: NSObject, ObservableObject {
         flight = nil; settling = nil; localSettle = nil; authSettles = [:]; plan = nil; remoteAim = nil; ts = 1; slowT = 0
         battle = Battle(seed: seed ?? UInt32.random(in: 0...UInt32.max), first: first, designs: designs, rules: rules, arena: arena)
         if let c = carry { battle.castles[0].adopt(c) }
+        world.looks = designs.indices.map { cosmetics(for: $0) }
         #if DEBUG
         print("MATCH mode=\(m) bricks=\(designs.map { $0.bricks.count }) coins=\(designs.map { $0.cost })")
         #endif
@@ -555,6 +625,11 @@ final class GameController: NSObject, ObservableObject {
                 return seatGone.indices.contains(i) && seatGone[i] ? "\(name) (\(Tx.botTag))" : name
             }
         }
+    }
+
+    /// Supporter crowns per seat. Pass-and-play shares one device, so nobody wears one there.
+    private func crowns() -> [Bool] {
+        battle.castles.indices.map { mode != .local && cosmetics(for: $0).supporter }
     }
 
     private func driverOf(_ side: Int) -> Driver {
@@ -637,7 +712,7 @@ final class GameController: NSObject, ObservableObject {
         let fw = battle.arena.forward(side)
         ballDir = simd_length_squared(h) > 1e-8 ? simd_normalize(h) : SIMD3(Float(fw.x), 0, Float(fw.z))
         world.hidePreview()
-        world.fireBall(from: p0, dir: d, side: side, style: ballStyle(for: side), ammo: f.res.ammo, mega: f.res.mega)
+        world.fireBall(from: p0, dir: d, side: side, style: ballStyle(for: side), ammo: f.res.ammo, mega: f.res.mega, trail: cosmetics(for: side).trail)
         sfx.play(.fire)
         thump(.heavy)
         pull = nil; timeLeft = nil; megaArmed = false; ammo = .standard
@@ -649,7 +724,7 @@ final class GameController: NSObject, ObservableObject {
         guard let f = flight else { return }
         let res = f.res
         world.endBall()
-        world.showLanding(res)
+        world.showLanding(res, impact: cosmetics(for: f.side).impact)
         world.showTarget(nil)
         if f.res.collectedAt != nil && !f.popped { world.popPickup() }
         impactP = res.pos.f
@@ -863,7 +938,7 @@ final class GameController: NSObject, ObservableObject {
         beginTurn()
         if let g = battle.regrown {
             world.adopt(battle.snapshots, blend: 0.3)
-            world.showRepair(side: g.side, bricks: [g.block], glow: Look.heartColors(battle.castles[g.side].heartKind).glow)
+            world.showRepair(side: g.side, bricks: [g.block], glow: Look.heartColors(battle.castles[g.side].heartKind, gem: cosmetics(for: g.side).gem).glow)
             show(toast: Tx.heartRegrew)
             refreshHUD()
         }
@@ -999,6 +1074,7 @@ final class GameController: NSObject, ObservableObject {
             sfx.play(.win)
         }
         info.names = nm
+        info.crowns = crowns()
         present(info)
     }
 
@@ -1011,6 +1087,7 @@ final class GameController: NSObject, ObservableObject {
         info.rivalStats = stats[1]
         info.side = 0
         info.names = names()
+        info.crowns = crowns()
         if won {
             let carry = battle.castles[0]
             let fixed = carry.repair(mass: carry.total * Gauntlet.repairShare).count
@@ -1077,6 +1154,7 @@ final class GameController: NSObject, ObservableObject {
     private func refreshHUD() {
         var h = HUD()
         h.names = names()
+        h.crowns = crowns()
         h.pct = battle.castles.map { $0.pct }
         h.heart = battle.castles.map { $0.heartPct }
         h.charge = battle.charge
@@ -1190,6 +1268,7 @@ final class GameController: NSObject, ObservableObject {
         net = nil
         round = 0; isHost = false; wantAgain = false; oppAgain = false; pendingShot = nil; oppGone = false
         rival = nil
+        rivalLook = .plain
         partyPeers = [:]; hostNonce = 0
     }
 
@@ -1207,8 +1286,10 @@ final class GameController: NSObject, ObservableObject {
     }
 
     private func sendHello() {
-        net?.send(NetMessage(t: "hello", nonce: myNonce, name: profile.name, trophies: profile.trophies, level: profile.level, design: myCastle.encoded,
-                             rules: K.rulesVersion), reliable: true)
+        var m = NetMessage(t: "hello", nonce: myNonce, name: profile.name, trophies: profile.trophies, level: profile.level, design: myCastle.encoded,
+                           rules: K.rulesVersion)
+        m.attach(myLook)
+        net?.send(m, reliable: true)
     }
 
     /// Four-castle lobby: someone joined or left. The nearby host starts by hand; on Game Center the
@@ -1247,7 +1328,7 @@ final class GameController: NSObject, ObservableObject {
         isHost = true
         round += 1
         if round == 1 {
-            seats = [SeatInfo(nonce: myNonce, name: profile.name, level: profile.level, design: myCastle.encoded)]
+            seats = [SeatInfo(nonce: myNonce, name: profile.name, level: profile.level, design: myCastle.encoded, look: myLook)]
             seats += partyPeers.values.sorted { $0.nonce < $1.nonce }.prefix(3)
             var picks = Presets.all.shuffled()
             while seats.count < 4 { seats.append(SeatInfo(nonce: 0, name: Tx.seatName(seats.count), level: 1, design: picks.removeFirst().encoded)) }
@@ -1356,6 +1437,7 @@ final class GameController: NSObject, ObservableObject {
             // Their castle is checked against the building rules; anything else becomes the classic layout.
             rival = (Profile.cleanName(m.name ?? ""), min(100_000, max(0, m.trophies ?? 0)), min(999, max(1, m.level ?? 1)),
                      BrickDesign.decode(m.design ?? []) ?? Presets.classic)
+            rivalLook = m.cosmetics
             isHost = myNonce > n
             if isHost && round == 0 { hostNewRound() }
         case "start":
@@ -1386,7 +1468,7 @@ final class GameController: NSObject, ObservableObject {
             guard m.rules == K.rulesVersion else { return }
             if partyPeers[n] == nil && partyPeers.count < 3 && round == 0 {
                 partyPeers[n] = SeatInfo(nonce: n, name: Profile.cleanName(m.name ?? ""), level: min(999, max(1, m.level ?? 1)),
-                                         design: (BrickDesign.decode(m.design ?? []) ?? Presets.classic).encoded)
+                                         design: (BrickDesign.decode(m.design ?? []) ?? Presets.classic).encoded, look: m.cosmetics)
                 sendHello()
             }
             partyLobbyChanged()
@@ -1395,7 +1477,7 @@ final class GameController: NSObject, ObservableObject {
                   let mine = list.firstIndex(where: { $0.nonce == myNonce }) else { return }
             hostNonce = m.nonce ?? 0
             seats = list.map { SeatInfo(nonce: $0.nonce, name: Profile.cleanName($0.name), level: min(999, max(1, $0.level)),
-                                        design: (BrickDesign.decode($0.design) ?? Presets.classic).encoded) }
+                                        design: (BrickDesign.decode($0.design) ?? Presets.classic).encoded, look: $0.look) }
             let gone = seatGone
             startParty(seed: seed, me: mine, first: first, round: r)
             if gone.count == seats.count { seatGone = gone }

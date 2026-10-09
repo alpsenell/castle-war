@@ -33,6 +33,14 @@ struct NetMessage: Codable {
     var seats: [SeatInfo]? = nil
     /// "settle": per castle, base64 of `CastleSnapshot.delta` from the poses before the shot.
     var data: [String]? = nil
+    // Sent with "hello" from 2.1: the sender's shop cosmetics, by raw value. Older builds leave
+    // them out and ignore them; unknown values fall back to the default look.
+    var skin: String? = nil
+    var trail: String? = nil
+    var impact: String? = nil
+    var gem: String? = nil
+    var banner: String? = nil
+    var supporter: Bool? = nil
 }
 
 struct SeatInfo: Codable, Equatable {
@@ -40,6 +48,8 @@ struct SeatInfo: Codable, Equatable {
     var name: String
     var level: Int
     var design: [Int]
+    /// The player's shop cosmetics; missing from older builds.
+    var look: Cosmetics? = nil
 }
 
 /// A two-player connection. All callbacks arrive on the main queue.

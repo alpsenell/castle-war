@@ -18,6 +18,7 @@ extension World {
         // Only the merged copy is hidden: nodes with bodies must never be.
         castleViews.first?.flat?.isHidden = true
         let bench = BuildBench(arena: arena)
+        bench.style = look(0).style
         scene.rootNode.addChildNode(bench.root)
         scene.rootNode.addChildNode(bench.ghostRoot)
         bench.world = self
@@ -53,6 +54,8 @@ final class BuildBench {
     private var marked: Int?
     private var homes: [simd_float4x4] = []
     private(set) var testing = false
+    /// The player's skin and heart gem, so the builder shows the castle as it will look in a match.
+    var style = BrickStyle.plain
 
     static let margin: Float = 2.5
 
@@ -89,7 +92,7 @@ final class BuildBench {
         guard !testing else { return }
         bricksNode.childNodes.forEach { $0.removeFromParentNode() }
         nodes = design.bricks.enumerated().map { i, b in
-            let n = BuildBench.node(for: b, heart: design.heart)
+            let n = BuildBench.node(for: b, heart: design.heart, style: style)
             n.name = "b\(i)"
             if warn.contains(i) { n.geometry = BuildBench.tinted(b.shape, b.material, warn: true) }
             n.isHidden = b.y >= layer * BK.steps
@@ -104,8 +107,8 @@ final class BuildBench {
     }
 
     /// A brick as the builder draws it: the match look, plus water for moats and a floating gem over crystals.
-    static func node(for b: PlacedBrick, heart: HeartKind) -> SCNNode {
-        let n = BrickGeometry.node(for: b)
+    static func node(for b: PlacedBrick, heart: HeartKind, style: BrickStyle = .plain) -> SCNNode {
+        let n = BrickGeometry.node(for: b, heart: heart, style: style)
         if b.shape == .moat {
             let water = SCNPlane(width: CGFloat(b.extent.x) * CGFloat(BK.step) * 0.96, height: CGFloat(b.extent.z) * CGFloat(BK.step) * 0.96)
             water.materials = [Look.moatWater]
@@ -118,7 +121,7 @@ final class BuildBench {
             let gem = SCNNode()
             for flip in [false, true] {
                 let half = SCNNode(geometry: SCNPyramid(width: 0.55, height: 0.5, length: 0.55))
-                half.geometry?.materials = [Look.heartMaterial(heart)]
+                half.geometry?.materials = [Look.heartMaterial(heart, gem: style.gem)]
                 if flip { half.eulerAngles.x = .pi }
                 gem.addChildNode(half)
             }
@@ -135,7 +138,7 @@ final class BuildBench {
         guard i != marked else { return }
         if let m = marked, m < nodes.count, m < shown.bricks.count {
             let b = shown.bricks[m]
-            nodes[m].geometry = b.shape == .moat ? nodes[m].geometry : BrickGeometry.geometry(b.shape, b.material)
+            nodes[m].geometry = b.shape == .moat ? nodes[m].geometry : BrickGeometry.geometry(b.shape, b.material, heart: shown.heart, variant: BrickGeometry.variant(of: b), style: style)
             nodes[m].opacity = 1
         }
         marked = i

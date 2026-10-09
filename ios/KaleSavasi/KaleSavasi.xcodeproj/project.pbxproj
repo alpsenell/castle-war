@@ -8,10 +8,16 @@
 
 /* Begin PBXBuildFile section */
 		05069431283F39C2BBF794F8 /* Rules.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86AEB13D6197BE1DDFBDD1ED /* Rules.swift */; };
+		05E433A636E5B9894DD708A1 /* StoreKitTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 550356E3E503144BA84F109A /* StoreKitTest.framework */; };
 		18CE1FA88BD358714F38E6C7 /* Stamps.swift in Sources */ = {isa = PBXBuildFile; fileRef = B29EE416F929A78A3E2E1F85 /* Stamps.swift */; };
+		22F9C0F735240F3CB25E1CBD /* Store.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32957352FB44364843696254 /* Store.swift */; };
+		27E55EF0F1993665D81FD6C0 /* Products.storekit in Resources */ = {isa = PBXBuildFile; fileRef = B24EA2D60133C6B02BD2B3B7 /* Products.storekit */; };
 		2EDA423D594B7E1BB42DEFF8 /* Legacy.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B145F9B1951E4C26F1D4AD /* Legacy.swift */; };
 		33BEED068E0A700B12F284BA /* Net.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DCB1F1E5FF3A8CB55F594C5 /* Net.swift */; };
+		4A8DC593C16C4F4061795E57 /* StoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5232ABBDFC5DF4022E6DF070 /* StoreTests.swift */; };
+		4FC9E8B185E830E299BC967C /* Skins.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17ABA57310B5A5FAD6737478 /* Skins.swift */; };
 		51BE5FE3798D9EFA42295B05 /* World.swift in Sources */ = {isa = PBXBuildFile; fileRef = 914D6F007EA7A24B1C52E564 /* World.swift */; };
+		539AC356B22DA57484386479 /* World+Cosmetics.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAD9A3667864D5C246E55B2B /* World+Cosmetics.swift */; };
 		560C95447A93674971F0F60C /* Textures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 823D0CAB0929129EF535EA92 /* Textures.swift */; };
 		58C6A4F8294C72D4837E4E97 /* Views.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5469E465B403D15E28ADE431 /* Views.swift */; };
 		687D6577945EAB72D84D4F38 /* Menus.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB8224A17A6FB3CBB5E79D2D /* Menus.swift */; };
@@ -19,23 +25,44 @@
 		70B36760A2FC34934D370595 /* BuilderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3747712D5D44C078505D790 /* BuilderView.swift */; };
 		7A1A24CE228924465502D41E /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E7EF73AAC1A6B852C9DA722 /* Theme.swift */; };
 		7CA8724B0C2CD70D84316BB7 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = 38B5CCF673CF05A36471F7A4 /* InfoPlist.strings */; };
+		95C23AF4A386C7AE5E14B007 /* ShopPreviews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85207BD5AF92B60B87240043 /* ShopPreviews.swift */; };
 		96D9BA2182943F859CBDE186 /* BrickGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFCA23F68AE5AD47666CB567 /* BrickGeometry.swift */; };
 		9C304F6BD7623CF8AC36009C /* GameController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7A1AE2CF41C6AE22B158A24 /* GameController.swift */; };
 		AF6D3F975F7AE47F376EC563 /* Physics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BFB6D329174105875B5F5E2 /* Physics.swift */; };
 		C8B7FA012529A7259C16C192 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F9AFA7634DE71857938BFD35 /* Assets.xcassets */; };
+		D4AF5CA739504514F6DD65DC /* ShopView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71C049842F77B04217242F85 /* ShopView.swift */; };
 		DB94CEBD5EF3DA262C4EF53E /* GameController+Builder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2517B286CCDCB293EA20E78D /* GameController+Builder.swift */; };
 		DDC3CF3096FCB62119A012FD /* Bricks.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3C9AA6B945C584FB7A351AA /* Bricks.swift */; };
 		E121CA59FBFEE3E36A593DB1 /* World+Builder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 181CA527699AF2B160B039BB /* World+Builder.swift */; };
 		E176E306895D1C359BE2B975 /* Sfx.swift in Sources */ = {isa = PBXBuildFile; fileRef = 930588B241A4AEA001E25EF6 /* Sfx.swift */; };
 		E25292221B0D944D4CCD3A03 /* Profile.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFB2E22A6C6B4617463F7EEF /* Profile.swift */; };
+		F63C56120798F058E96C50C6 /* Cosmetics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84D41D45AA946A4ACE32AF1C /* Cosmetics.swift */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		8AB2437C1D23DF3FE3746E40 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 9348621FA8153BD9F4E5FF8D /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = CE827235047306C4439BA1D9;
+			remoteInfo = KaleSavasi;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
+		17ABA57310B5A5FAD6737478 /* Skins.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Skins.swift; sourceTree = "<group>"; };
 		181CA527699AF2B160B039BB /* World+Builder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "World+Builder.swift"; sourceTree = "<group>"; };
 		2517B286CCDCB293EA20E78D /* GameController+Builder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GameController+Builder.swift"; sourceTree = "<group>"; };
+		32957352FB44364843696254 /* Store.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Store.swift; sourceTree = "<group>"; };
+		3F900092FC32EC09E52A9F3F /* KaleSavasiTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = KaleSavasiTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		5232ABBDFC5DF4022E6DF070 /* StoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreTests.swift; sourceTree = "<group>"; };
 		5469E465B403D15E28ADE431 /* Views.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views.swift; sourceTree = "<group>"; };
+		550356E3E503144BA84F109A /* StoreKitTest.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = StoreKitTest.framework; path = System/Library/Frameworks/StoreKitTest.framework; sourceTree = SDKROOT; };
+		71C049842F77B04217242F85 /* ShopView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShopView.swift; sourceTree = "<group>"; };
 		7DD7CDDBC7ED7B47F2FA8A7B /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 		823D0CAB0929129EF535EA92 /* Textures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Textures.swift; sourceTree = "<group>"; };
+		84D41D45AA946A4ACE32AF1C /* Cosmetics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Cosmetics.swift; sourceTree = "<group>"; };
+		85207BD5AF92B60B87240043 /* ShopPreviews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShopPreviews.swift; sourceTree = "<group>"; };
 		86AEB13D6197BE1DDFBDD1ED /* Rules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Rules.swift; sourceTree = "<group>"; };
 		8BFB6D329174105875B5F5E2 /* Physics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Physics.swift; sourceTree = "<group>"; };
 		8DCB1F1E5FF3A8CB55F594C5 /* Net.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Net.swift; sourceTree = "<group>"; };
@@ -43,6 +70,7 @@
 		914D6F007EA7A24B1C52E564 /* World.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = World.swift; sourceTree = "<group>"; };
 		930588B241A4AEA001E25EF6 /* Sfx.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sfx.swift; sourceTree = "<group>"; };
 		A7A1AE2CF41C6AE22B158A24 /* GameController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameController.swift; sourceTree = "<group>"; };
+		B24EA2D60133C6B02BD2B3B7 /* Products.storekit */ = {isa = PBXFileReference; path = Products.storekit; sourceTree = "<group>"; };
 		B29EE416F929A78A3E2E1F85 /* Stamps.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Stamps.swift; sourceTree = "<group>"; };
 		B3C9AA6B945C584FB7A351AA /* Bricks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Bricks.swift; sourceTree = "<group>"; };
 		BFCA23F68AE5AD47666CB567 /* BrickGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrickGeometry.swift; sourceTree = "<group>"; };
@@ -52,9 +80,21 @@
 		D74DDD83CE8BEF18F51187EC /* Strings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Strings.swift; sourceTree = "<group>"; };
 		DFB2E22A6C6B4617463F7EEF /* Profile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Profile.swift; sourceTree = "<group>"; };
 		E2B145F9B1951E4C26F1D4AD /* Legacy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Legacy.swift; sourceTree = "<group>"; };
+		EAD9A3667864D5C246E55B2B /* World+Cosmetics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "World+Cosmetics.swift"; sourceTree = "<group>"; };
 		F377EB750792BBF16CEC1543 /* KaleSavasi.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = KaleSavasi.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F9AFA7634DE71857938BFD35 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		1D3BE4D1AE33E746110375EA /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				05E433A636E5B9894DD708A1 /* StoreKitTest.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		18590AC0F95EE6592F01E606 /* Sources */ = {
@@ -64,6 +104,7 @@
 				BFCA23F68AE5AD47666CB567 /* BrickGeometry.swift */,
 				B3C9AA6B945C584FB7A351AA /* Bricks.swift */,
 				C3747712D5D44C078505D790 /* BuilderView.swift */,
+				84D41D45AA946A4ACE32AF1C /* Cosmetics.swift */,
 				A7A1AE2CF41C6AE22B158A24 /* GameController.swift */,
 				2517B286CCDCB293EA20E78D /* GameController+Builder.swift */,
 				E2B145F9B1951E4C26F1D4AD /* Legacy.swift */,
@@ -73,30 +114,63 @@
 				DFB2E22A6C6B4617463F7EEF /* Profile.swift */,
 				86AEB13D6197BE1DDFBDD1ED /* Rules.swift */,
 				930588B241A4AEA001E25EF6 /* Sfx.swift */,
+				85207BD5AF92B60B87240043 /* ShopPreviews.swift */,
+				71C049842F77B04217242F85 /* ShopView.swift */,
+				17ABA57310B5A5FAD6737478 /* Skins.swift */,
 				B29EE416F929A78A3E2E1F85 /* Stamps.swift */,
+				32957352FB44364843696254 /* Store.swift */,
 				D74DDD83CE8BEF18F51187EC /* Strings.swift */,
 				823D0CAB0929129EF535EA92 /* Textures.swift */,
 				8E7EF73AAC1A6B852C9DA722 /* Theme.swift */,
 				5469E465B403D15E28ADE431 /* Views.swift */,
 				914D6F007EA7A24B1C52E564 /* World.swift */,
 				181CA527699AF2B160B039BB /* World+Builder.swift */,
+				EAD9A3667864D5C246E55B2B /* World+Cosmetics.swift */,
 				38B5CCF673CF05A36471F7A4 /* InfoPlist.strings */,
 			);
 			path = Sources;
+			sourceTree = "<group>";
+		};
+		28809C93E84B10F24DD9B7DA /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				550356E3E503144BA84F109A /* StoreKitTest.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		894BBE6022EBA109593EECF2 /* StoreKit */ = {
+			isa = PBXGroup;
+			children = (
+				B24EA2D60133C6B02BD2B3B7 /* Products.storekit */,
+			);
+			path = StoreKit;
 			sourceTree = "<group>";
 		};
 		A4B1F6F60C92AEBDE932A537 /* Products */ = {
 			isa = PBXGroup;
 			children = (
 				F377EB750792BBF16CEC1543 /* KaleSavasi.app */,
+				3F900092FC32EC09E52A9F3F /* KaleSavasiTests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		B992A1CFEA9FF7AD5F15FB8E /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				5232ABBDFC5DF4022E6DF070 /* StoreTests.swift */,
+			);
+			path = Tests;
 			sourceTree = "<group>";
 		};
 		E6EA41C886EBB07827A4F706 = {
 			isa = PBXGroup;
 			children = (
 				18590AC0F95EE6592F01E606 /* Sources */,
+				894BBE6022EBA109593EECF2 /* StoreKit */,
+				B992A1CFEA9FF7AD5F15FB8E /* Tests */,
+				28809C93E84B10F24DD9B7DA /* Frameworks */,
 				A4B1F6F60C92AEBDE932A537 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -104,6 +178,26 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		774D247C0772D1BDB9DD7082 /* KaleSavasiTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C0AF2F71D64EF4D61E159243 /* Build configuration list for PBXNativeTarget "KaleSavasiTests" */;
+			buildPhases = (
+				7FA5FC15135C71D7A73EEB4A /* Sources */,
+				190C0644CC67BBED28B823F7 /* Resources */,
+				1D3BE4D1AE33E746110375EA /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				7247B4E4EC70E13E1362722B /* PBXTargetDependency */,
+			);
+			name = KaleSavasiTests;
+			packageProductDependencies = (
+			);
+			productName = KaleSavasiTests;
+			productReference = 3F900092FC32EC09E52A9F3F /* KaleSavasiTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		CE827235047306C4439BA1D9 /* KaleSavasi */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 026104295EC75737575028A8 /* Build configuration list for PBXNativeTarget "KaleSavasi" */;
@@ -131,6 +225,10 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
+					774D247C0772D1BDB9DD7082 = {
+						DevelopmentTeam = 6S7Q8F967Q;
+						ProvisioningStyle = Automatic;
+					};
 					CE827235047306C4439BA1D9 = {
 						DevelopmentTeam = 6S7Q8F967Q;
 						ProvisioningStyle = Automatic;
@@ -153,11 +251,20 @@
 			projectRoot = "";
 			targets = (
 				CE827235047306C4439BA1D9 /* KaleSavasi */,
+				774D247C0772D1BDB9DD7082 /* KaleSavasiTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		190C0644CC67BBED28B823F7 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				27E55EF0F1993665D81FD6C0 /* Products.storekit in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		72E33231652A3AC1F8F608DD /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -177,6 +284,7 @@
 				96D9BA2182943F859CBDE186 /* BrickGeometry.swift in Sources */,
 				DDC3CF3096FCB62119A012FD /* Bricks.swift in Sources */,
 				70B36760A2FC34934D370595 /* BuilderView.swift in Sources */,
+				F63C56120798F058E96C50C6 /* Cosmetics.swift in Sources */,
 				DB94CEBD5EF3DA262C4EF53E /* GameController+Builder.swift in Sources */,
 				9C304F6BD7623CF8AC36009C /* GameController.swift in Sources */,
 				2EDA423D594B7E1BB42DEFF8 /* Legacy.swift in Sources */,
@@ -186,17 +294,38 @@
 				E25292221B0D944D4CCD3A03 /* Profile.swift in Sources */,
 				05069431283F39C2BBF794F8 /* Rules.swift in Sources */,
 				E176E306895D1C359BE2B975 /* Sfx.swift in Sources */,
+				95C23AF4A386C7AE5E14B007 /* ShopPreviews.swift in Sources */,
+				D4AF5CA739504514F6DD65DC /* ShopView.swift in Sources */,
+				4FC9E8B185E830E299BC967C /* Skins.swift in Sources */,
 				18CE1FA88BD358714F38E6C7 /* Stamps.swift in Sources */,
+				22F9C0F735240F3CB25E1CBD /* Store.swift in Sources */,
 				691CC73C55EF7408772C48F2 /* Strings.swift in Sources */,
 				560C95447A93674971F0F60C /* Textures.swift in Sources */,
 				7A1A24CE228924465502D41E /* Theme.swift in Sources */,
 				58C6A4F8294C72D4837E4E97 /* Views.swift in Sources */,
 				E121CA59FBFEE3E36A593DB1 /* World+Builder.swift in Sources */,
+				539AC356B22DA57484386479 /* World+Cosmetics.swift in Sources */,
 				51BE5FE3798D9EFA42295B05 /* World.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7FA5FC15135C71D7A73EEB4A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4A8DC593C16C4F4061795E57 /* StoreTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		7247B4E4EC70E13E1362722B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = CE827235047306C4439BA1D9 /* KaleSavasi */;
+			targetProxy = 8AB2437C1D23DF3FE3746E40 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
 		38B5CCF673CF05A36471F7A4 /* InfoPlist.strings */ = {
@@ -218,14 +347,14 @@
 				CODE_SIGN_ENTITLEMENTS = KaleSavasi.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = 6S7Q8F967Q;
 				INFOPLIST_FILE = Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.0;
+				MARKETING_VERSION = 2.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.alpsenel.kalesavasi;
 				PRODUCT_NAME = KaleSavasi;
 				SDKROOT = iphoneos;
@@ -304,14 +433,14 @@
 				CODE_SIGN_ENTITLEMENTS = KaleSavasi.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = 6S7Q8F967Q;
 				INFOPLIST_FILE = Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.0;
+				MARKETING_VERSION = 2.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.alpsenel.kalesavasi;
 				PRODUCT_NAME = KaleSavasi;
 				SDKROOT = iphoneos;
@@ -319,6 +448,26 @@
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
+		};
+		995C505883A1B890CF473B57 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 6S7Q8F967Q;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.alpsenel.kalesavasi.tests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/KaleSavasi.app/KaleSavasi";
+			};
+			name = Debug;
 		};
 		A502E24FD0899D137323F790 /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -376,6 +525,26 @@
 			};
 			name = Release;
 		};
+		B71DCF780E1ACAE3CE4D05DF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 6S7Q8F967Q;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.alpsenel.kalesavasi.tests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/KaleSavasi.app/KaleSavasi";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -393,6 +562,15 @@
 			buildConfigurations = (
 				458AF79EB0EC197AC0844337 /* Debug */,
 				A502E24FD0899D137323F790 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		C0AF2F71D64EF4D61E159243 /* Build configuration list for PBXNativeTarget "KaleSavasiTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				995C505883A1B890CF473B57 /* Debug */,
+				B71DCF780E1ACAE3CE4D05DF /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

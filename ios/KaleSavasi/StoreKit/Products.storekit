@@ -1,0 +1,231 @@
+{
+  "identifier": "B7C1E2D4-21A0-4F51-9E3B-6B2D0C5A1F21",
+  "nonRenewingSubscriptions": [],
+  "products": [
+    {
+      "displayPrice": "2.99",
+      "familyShareable": false,
+      "internalID": "6A1F0000",
+      "localizations": [
+        {
+          "description": "Gilded stone, lacquered timber with gold, amber glass and bronze for your castle.",
+          "displayName": "Gold Castle",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "com.alpsenel.kalesavasi.skin.gold",
+      "referenceName": "Gold Castle",
+      "type": "NonConsumable"
+    },
+    {
+      "displayPrice": "2.99",
+      "familyShareable": false,
+      "internalID": "6A1F0001",
+      "localizations": [
+        {
+          "description": "Black volcanic stone with glowing ember cracks, and charred timber, for your castle.",
+          "displayName": "Obsidian",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "com.alpsenel.kalesavasi.skin.obsidian",
+      "referenceName": "Obsidian",
+      "type": "NonConsumable"
+    },
+    {
+      "displayPrice": "1.99",
+      "familyShareable": false,
+      "internalID": "6A1F0002",
+      "localizations": [
+        {
+          "description": "White veined marble, bleached wood, clear quartz and silver for your castle.",
+          "displayName": "Marble",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "com.alpsenel.kalesavasi.skin.marble",
+      "referenceName": "Marble",
+      "type": "NonConsumable"
+    },
+    {
+      "displayPrice": "1.99",
+      "familyShareable": false,
+      "internalID": "6A1F0003",
+      "localizations": [
+        {
+          "description": "Pastel sugar bricks, biscuit beams, jelly and licorice for your castle.",
+          "displayName": "Candy",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "com.alpsenel.kalesavasi.skin.candy",
+      "referenceName": "Candy",
+      "type": "NonConsumable"
+    },
+    {
+      "displayPrice": "0.99",
+      "familyShareable": false,
+      "internalID": "6A1F0004",
+      "localizations": [
+        {
+          "description": "Your cannonball paints a rainbow across the sky.",
+          "displayName": "Rainbow Trail",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "com.alpsenel.kalesavasi.trail.rainbow",
+      "referenceName": "Rainbow Trail",
+      "type": "NonConsumable"
+    },
+    {
+      "displayPrice": "0.99",
+      "familyShareable": false,
+      "internalID": "6A1F0005",
+      "localizations": [
+        {
+          "description": "Crackling blue-white sparks chase every shot.",
+          "displayName": "Lightning Trail",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "com.alpsenel.kalesavasi.trail.lightning",
+      "referenceName": "Lightning Trail",
+      "type": "NonConsumable"
+    },
+    {
+      "displayPrice": "0.99",
+      "familyShareable": false,
+      "internalID": "6A1F0006",
+      "localizations": [
+        {
+          "description": "A shower of golden sparkles falls behind the ball.",
+          "displayName": "Starfall Trail",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "com.alpsenel.kalesavasi.trail.starfall",
+      "referenceName": "Starfall Trail",
+      "type": "NonConsumable"
+    },
+    {
+      "displayPrice": "0.99",
+      "familyShareable": false,
+      "internalID": "6A1F0007",
+      "localizations": [
+        {
+          "description": "Colourful fireworks burst wherever your shot lands.",
+          "displayName": "Fireworks Impact",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "com.alpsenel.kalesavasi.impact.fireworks",
+      "referenceName": "Fireworks Impact",
+      "type": "NonConsumable"
+    },
+    {
+      "displayPrice": "1.99",
+      "familyShareable": false,
+      "internalID": "6A1F0008",
+      "localizations": [
+        {
+          "description": "Four heart crystal colours: Emerald, Sapphire, Amethyst and Sunfire.",
+          "displayName": "Heart Gems",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "com.alpsenel.kalesavasi.pack.hearts",
+      "referenceName": "Heart Gems",
+      "type": "NonConsumable"
+    },
+    {
+      "displayPrice": "0.99",
+      "familyShareable": false,
+      "internalID": "6A1F0009",
+      "localizations": [
+        {
+          "description": "Four crests for your castle flag: Lion, Dragon, Eagle and Wolf.",
+          "displayName": "Banners",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "com.alpsenel.kalesavasi.pack.banners",
+      "referenceName": "Banners",
+      "type": "NonConsumable"
+    },
+    {
+      "displayPrice": "4.99",
+      "familyShareable": false,
+      "internalID": "6A1F0010",
+      "localizations": [
+        {
+          "description": "Exclusive Royal skin and trail, a crown by your name and all four banners.",
+          "displayName": "Supporter Pack",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "com.alpsenel.kalesavasi.supporter",
+      "referenceName": "Supporter Pack",
+      "type": "NonConsumable"
+    }
+  ],
+  "settings": {
+    "_applicationInternalID": "",
+    "_developerTeamID": "6S7Q8F967Q",
+    "_failTransactionsEnabled": false,
+    "_lastSynchronizedDate": 0,
+    "_locale": "en_US",
+    "_storefront": "USA",
+    "_storeKitErrors": [
+      {
+        "current": null,
+        "enabled": false,
+        "name": "Load Products"
+      },
+      {
+        "current": null,
+        "enabled": false,
+        "name": "Purchase"
+      },
+      {
+        "current": null,
+        "enabled": false,
+        "name": "Verification"
+      },
+      {
+        "current": null,
+        "enabled": false,
+        "name": "App Store Sync"
+      },
+      {
+        "current": null,
+        "enabled": false,
+        "name": "Subscription Status"
+      },
+      {
+        "current": null,
+        "enabled": false,
+        "name": "App Transaction"
+      },
+      {
+        "current": null,
+        "enabled": false,
+        "name": "Manage Subscriptions Sheet"
+      },
+      {
+        "current": null,
+        "enabled": false,
+        "name": "Refund Request Sheet"
+      },
+      {
+        "current": null,
+        "enabled": false,
+        "name": "Offer Code Redeem Sheet"
+      }
+    ]
+  },
+  "subscriptionGroups": [],
+  "version": {
+    "major": 4,
+    "minor": 0
+  }
+}

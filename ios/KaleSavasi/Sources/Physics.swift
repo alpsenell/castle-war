@@ -79,12 +79,12 @@ extension World: BrickPhysics {
         lockScene(); defer { unlockScene() }
         for v in castleViews { v.root.removeFromParentNode(); v.flat?.removeFromParentNode(); v.gems.forEach { $0.anchor.removeFromParentNode() } }
         castleViews = designs.enumerated().map { i, d in
-            makeCastle(i, design: d, poses: poses.flatMap { i < $0.count && $0[i].poses.count == d.bricks.count ? $0[i] : nil } ?? CastleSnapshot(design: d))
+            makeCastle(i, design: d, poses: poses.flatMap { i < $0.count && $0[i].poses.count == d.bricks.count ? $0[i] : nil } ?? CastleSnapshot(design: d), look: look(i))
         }
     }
 
-    func makeCastle(_ side: Int, design: BrickDesign, poses: CastleSnapshot) -> CastleBricks {
-        let v = CastleBricks(side: side, design: design, frame: CastleFrame(seat: side, arena: arena))
+    func makeCastle(_ side: Int, design: BrickDesign, poses: CastleSnapshot, look: Cosmetics = .plain) -> CastleBricks {
+        let v = CastleBricks(side: side, design: design, frame: CastleFrame(seat: side, arena: arena), look: look)
         v.nodes = design.bricks.enumerated().map { i, b in
             let pose = poses.poses[i]
             guard !pose.broken else { return nil }
@@ -102,7 +102,7 @@ extension World: BrickPhysics {
         for n in v.nodes.compactMap({ $0 }) { dress(n, in: v) }
         if let top = v.nodes.compactMap({ $0 }).filter({ $0.brick.shape.isTop || $0.brick.shape == .coneRoof }).max(by: { $0.brick.y < $1.brick.y })
             ?? v.nodes.compactMap({ $0 }).max(by: { $0.brick.y + $0.brick.extent.y < $1.brick.y + $1.brick.extent.y }) {
-            addFlag(to: top, side: side)
+            addFlag(to: top, side: side, banner: v.look.banner)
         }
         scene.rootNode.addChildNode(v.root)
         flatten(v)
@@ -113,7 +113,7 @@ extension World: BrickPhysics {
     private func dress(_ n: BrickNode, in v: CastleBricks) {
         let b = n.brick
         let wear: BrickGeometry.Wear = b.material == .iron && n.hp < n.maxHp ? .cracked : b.material.isCrystal && v.lostCrystals.contains(n.index) ? .revealed : .whole
-        n.geometry = BrickGeometry.geometry(b.shape, b.material, heart: v.design.heart, variant: BrickGeometry.variant(of: b), wear: wear)
+        n.geometry = BrickGeometry.geometry(b.shape, b.material, heart: v.design.heart, variant: BrickGeometry.variant(of: b), wear: wear, style: v.style)
     }
 
     /// A heart or decoy that is broken or knocked well away from its spot.
@@ -171,7 +171,7 @@ extension World: BrickPhysics {
 
     private func addGem(_ v: CastleBricks, brick i: Int) {
         let anchor = SCNNode(), n = SCNNode()
-        let crystal = Look.heartMaterial(v.design.heart)
+        let crystal = Look.heartMaterial(v.design.heart, gem: v.look.gem)
         for flip in [false, true] {
             let half = SCNNode(geometry: SCNPyramid(width: 1.1, height: 1.0, length: 1.1))
             half.geometry?.materials = [crystal]
@@ -180,7 +180,7 @@ extension World: BrickPhysics {
         }
         let light = SCNLight()
         light.type = .omni
-        light.color = UIColor(hex: Look.heartColors(v.design.heart).glow)
+        light.color = UIColor(hex: Look.heartColors(v.design.heart, gem: v.look.gem).glow)
         light.intensity = 320
         light.attenuationStartDistance = 0.5
         light.attenuationEndDistance = 5
@@ -201,17 +201,36 @@ extension World: BrickPhysics {
         }
     }
 
-    /// A team banner on the castle's highest brick; it falls with it.
-    private func addFlag(to n: BrickNode, side: Int) {
+    /// A team banner on the castle's highest brick; it falls with it. A crest from the shop makes
+    /// it a little larger, with the emblem in gold on the team colour.
+    private func addFlag(to n: BrickNode, side: Int, banner: Banner = .none) {
         let top = Float(n.brick.shape.size.y) * Float(BK.step) / 2
-        let pole = SCNNode(geometry: SCNCylinder(radius: 0.08, height: 3.2))
-        pole.geometry?.materials = [Look.solid(0x3a3d40, roughness: 0.4, metal: 1)]
-        pole.position = SCNVector3(0, top + 1.5, 0)
-        let cloth = SCNNode(geometry: SCNBox(width: 0.05, height: 1.1, length: 1.9, chamferRadius: 0))
-        cloth.geometry?.materials = [Look.solid(Look.accent[side % Look.accent.count], roughness: 0.9)]
-        cloth.position = SCNVector3(0, top + 2.5, 0.98)
-        n.addChildNode(pole)
-        n.addChildNode(cloth)
+        for part in World.flagNodes(top: top, accent: Look.accent[side % Look.accent.count], banner: banner) { n.addChildNode(part) }
+    }
+
+    /// Pole and cloth of a flag standing on a surface `top` units above the parent's origin.
+    static func flagNodes(top: Float, accent: UInt32, banner: Banner) -> [SCNNode] {
+        let crest = banner != .none
+        let poleH: Float = crest ? 4.0 : 3.2, clothH: CGFloat = crest ? 1.7 : 1.1, clothL: CGFloat = crest ? 2.7 : 1.9
+        let pole = SCNNode(geometry: SCNCylinder(radius: 0.08, height: CGFloat(poleH)))
+        pole.geometry?.materials = [Look.solid(crest ? 0xc99a2e : 0x3a3d40, roughness: 0.4, metal: 1)]
+        pole.position = SCNVector3(0, top + poleH / 2 - 0.1, 0)
+        let cloth = SCNNode(geometry: SCNBox(width: 0.05, height: clothH, length: clothL, chamferRadius: 0))
+        if crest {
+            let m = Look.solid(accent, roughness: 0.85)
+            m.diffuse.contents = Emblem.flag(banner, color: accent)
+            m.emission.contents = Emblem.flag(banner, color: accent)
+            m.emission.intensity = 0.12
+            cloth.geometry?.materials = [m]
+        } else {
+            cloth.geometry?.materials = [Look.solid(accent, roughness: 0.9)]
+        }
+        cloth.position = SCNVector3(0, top + poleH - 0.1 - Float(clothH) / 2, Float(clothL) / 2 + 0.03)
+        guard crest else { return [pole, cloth] }
+        let finial = SCNNode(geometry: SCNSphere(radius: 0.2))
+        finial.geometry?.materials = [Look.solid(0xf2c14e, roughness: 0.3, metal: 1)]
+        finial.position = SCNVector3(0, top + poleH, 0)
+        return [pole, cloth, finial]
     }
 
     // MARK: Playing a shot
@@ -295,7 +314,7 @@ extension World: BrickPhysics {
         b.pierce = pierce
         b.lastVelocity = velocity
         b.born = clock
-        if let trail = ball.particleSystems?.first?.copy() as? SCNParticleSystem { b.addParticleSystem(trail) }
+        for case let trail as SCNParticleSystem in (ball.particleSystems ?? []).map({ $0.copy() }) { b.addParticleSystem(trail) }
         looseRoot.addChildNode(b)
         b.physicsBody?.velocity = SCNVector3(velocity.x, velocity.y, velocity.z)
         play.balls.append(b)
@@ -403,7 +422,7 @@ extension World: BrickPhysics {
     private func watchCrystals(_ v: CastleBricks) {
         for (i, b) in v.design.bricks.enumerated() where b.material.isCrystal && !v.lostCrystals.contains(i) && gone(v, i) {
             v.lostCrystals.insert(i)
-            let glow = Look.heartColors(v.design.heart).glow
+            let glow = Look.heartColors(v.design.heart, gem: v.look.gem).glow
             if let g = v.gems.firstIndex(where: { $0.brick == i }) {
                 let p = v.gems[g].anchor.presentation.simdWorldPosition
                 v.gems.remove(at: g).anchor.removeFromParentNode()
@@ -450,7 +469,7 @@ extension World: BrickPhysics {
         let v = castleViews[n.castle], p = spot(n)
         dress(n, in: v)
         if n.brick.material.isCrystal {
-            let glow = Look.heartColors(v.design.heart).glow
+            let glow = Look.heartColors(v.design.heart, gem: v.look.gem).glow
             burst(at: p, colors: [glow, 0xffffff], count: 40, speed: 8, life: 0.7, size: 0.6, accel: -6, cone: false, additive: true)
         } else {
             burst(at: p, colors: [0xffc36b, 0xffffff], count: 24, speed: 9, life: 0.35, size: 0.3, accel: -14, cone: false, additive: true)
@@ -471,7 +490,7 @@ extension World: BrickPhysics {
         n.hp = 0
         let b = n.brick, m = b.material
         let p = SIMD3<Float>(t.columns.3.x, t.columns.3.y, t.columns.3.z)
-        if !quiet { dust(m, at: p, heart: v.design.heart) }
+        if !quiet { dust(m, at: p, heart: v.design.heart, look: v.look) }
         guard !b.shape.isDecal else { return }
         let s = b.shape.size, k = Float(BK.step)
         let size = SIMD3(Float(s.x), Float(s.y), Float(s.z)) * k * SIMD3(1, Float(b.shape.boxes.count == 1 ? 1 : 0.6), 1)
@@ -488,7 +507,7 @@ extension World: BrickPhysics {
             var off = SIMD3<Float>(0, 0, 0)
             off[axis] = (Float(i) + 0.5) / Float(pieces) * long - long / 2
             let world = t * SIMD4(off.x, off.y, off.z, 1)
-            let geo = BrickGeometry.fragment(size: simd_max(piece, SIMD3(repeating: 0.25)), material: m, heart: v.design.heart, variant: BrickGeometry.variant(of: b))
+            let geo = BrickGeometry.fragment(size: simd_max(piece, SIMD3(repeating: 0.25)), material: m, heart: v.design.heart, variant: BrickGeometry.variant(of: b), style: v.style)
             let chip = SCNNode(geometry: geo)
             // Fragments fly far and fast; as shadow casters they would stretch the sun's shadow
             // map over a much larger area and blur every shadow until they fade.
@@ -514,7 +533,19 @@ extension World: BrickPhysics {
         if !quiet { onBreak?(m) }
     }
 
-    private func dust(_ m: BrickMaterial, at p: SIMD3<Float>, heart: HeartKind) {
+    private func dust(_ m: BrickMaterial, at p: SIMD3<Float>, heart: HeartKind, look: Cosmetics = .plain) {
+        if look.skin != .classic, !m.isCrystal {
+            // A skinned castle breaks into its own colours, with the same amounts and motion.
+            let d = SkinPalette.of(look.skin).dust(m)
+            let additive = m == .ice || m == .iron
+            burst(at: p, colors: d.chips, count: m == .ice ? 60 : 40, speed: m == .iron ? 12 : 9, life: m == .iron ? 0.5 : 0.9, size: m == .iron ? 0.25 : 0.36,
+                  accel: -18, cone: false, additive: additive)
+            burst(at: p, colors: d.cloud, count: 18, speed: 3, life: 1.8, size: m == .stone ? 2.2 : 1.6, accel: 0.8, cone: false, grow: 1.9, alpha: 0.42)
+            if look.skin == .obsidian && m == .stone {
+                burst(at: p, colors: [0xff7a1e, 0xffc23a], count: 30, speed: 7, life: 0.8, size: 0.3, accel: -6, cone: false, additive: true)
+            }
+            return
+        }
         switch m {
         case .wood:
             burst(at: p, colors: [0x8a5a33, 0xc49a6c], count: 40, speed: 9, life: 0.9, size: 0.32, accel: -18, cone: false)
@@ -529,7 +560,7 @@ extension World: BrickPhysics {
             burst(at: p, colors: [0xffc36b, 0xffffff], count: 46, speed: 12, life: 0.5, size: 0.25, accel: -16, cone: false, additive: true)
             burst(at: p, colors: [0x55595e], count: 14, speed: 3, life: 1.6, size: 1.8, accel: 1, cone: false, grow: 1.8, alpha: 0.45)
         case .heart, .decoy:
-            let glow = Look.heartColors(heart).glow
+            let glow = Look.heartColors(heart, gem: look.gem).glow
             burst(at: p, colors: [glow, 0xffffff], count: 70, speed: 13, life: 0.9, size: 0.5, accel: -10, cone: false, additive: true)
         }
     }

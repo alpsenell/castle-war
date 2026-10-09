@@ -205,6 +205,9 @@ struct Profile: Codable, Equatable {
     var megas = 0, flawlessWins = 0, comebackWins = 0, decoysFooled = 0, friendWins = 0, castlesSaved = 0
     var gauntletBest = 0
     var achievements: [String] = []
+    /// Shop cosmetics the player has picked, by raw value; empty is the default look. What actually
+    /// shows is limited to what the store says is owned: see `cosmetics(owned:)`.
+    var equipSkin = "", equipTrail = "", equipImpact = "", equipGem = "", equipBanner = ""
 
     static let storageKey = "profile.v1"
     /// Game Center leaderboards. Create them in App Store Connect with these IDs.
@@ -237,6 +240,8 @@ struct Profile: Codable, Equatable {
         decoysFooled = int(.decoysFooled); friendWins = int(.friendWins); castlesSaved = int(.castlesSaved)
         gauntletBest = int(.gauntletBest)
         achievements = (try? c.decodeIfPresent([String].self, forKey: .achievements)) ?? []
+        equipSkin = str(.equipSkin); equipTrail = str(.equipTrail); equipImpact = str(.equipImpact)
+        equipGem = str(.equipGem); equipBanner = str(.equipBanner)
     }
 
     func has(_ a: Achievement) -> Bool { achievements.contains(a.rawValue) }

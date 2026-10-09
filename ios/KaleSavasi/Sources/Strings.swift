@@ -548,4 +548,117 @@ enum Tx {
     static var settling: String { p("Taşlar düşüyor…", "Bricks falling…") }
     // MARK: 2.0 integration
     static var castleCrumbled: String { p("Kale çöktü, kalp de düştü!", "The castle crumbled and took its heart down!") }
+
+    // MARK: 2.1 shop
+    static var shop: String { p("Mağaza", "Shop") }
+    static var appearance: String { p("Görünüm", "Appearance") }
+    static func shopTab(_ t: ShopTab) -> String {
+        switch t {
+        case .featured: return p("Öne çıkanlar", "Featured")
+        case .skins: return p("Kale kaplamaları", "Castle Skins")
+        case .trails: return p("İzler ve efektler", "Trails & Effects")
+        case .hearts: return p("Kalpler ve sancaklar", "Hearts & Banners")
+        case .look: return p("Görünümüm", "My Look")
+        }
+    }
+    static func shopItem(_ i: ShopItem) -> String {
+        switch i {
+        case .supporter: return p("Destekçi Paketi", "Supporter Pack")
+        case .gold: return p("Altın Kale", "Gold Castle")
+        case .obsidian: return p("Obsidyen", "Obsidian")
+        case .marble: return p("Mermer", "Marble")
+        case .candy: return p("Şeker", "Candy")
+        case .rainbow: return p("Gökkuşağı İzi", "Rainbow Trail")
+        case .lightning: return p("Şimşek İzi", "Lightning Trail")
+        case .starfall: return p("Yıldız Yağmuru", "Starfall Trail")
+        case .fireworks: return p("Havai Fişek", "Fireworks Impact")
+        case .hearts: return p("Kalp Taşları", "Heart Gems")
+        case .banners: return p("Sancaklar", "Banners")
+        }
+    }
+    static func shopDetail(_ i: ShopItem) -> String {
+        switch i {
+        case .supporter: return p("Özel Kraliyet kaplaması ve izi, adının yanında bir taç ve dört sancağın hepsi. Keepfall'u desteklediğin için teşekkürler!",
+                                  "The exclusive Royal skin and trail, a crown by your name and all four banners. Thank you for supporting Keepfall!")
+        case .gold: return p("Yaldızlı taş, altın işlemeli cilalı ahşap, kehribar cam ve bronz.", "Gilded stone, lacquered timber with gold, amber glass and bronze.")
+        case .obsidian: return p("İçinde kor çatlakları parlayan siyah volkan taşı, kömürleşmiş ahşap.", "Black volcanic stone with glowing ember cracks, and charred timber.")
+        case .marble: return p("Damarlı beyaz mermer, ağartılmış ahşap, kuvars ve gümüş.", "White veined marble, bleached wood, clear quartz and silver.")
+        case .candy: return p("Pastel şeker tuğlalar, bisküvi kirişler, jöle ve meyankökü.", "Pastel sugar bricks, biscuit beams, jelly and licorice.")
+        case .rainbow: return p("Güllen gökyüzüne bir gökkuşağı çizer.", "Your cannonball paints a rainbow across the sky.")
+        case .lightning: return p("Her atışı çatırdayan mavi-beyaz kıvılcımlar izler.", "Crackling blue-white sparks chase every shot.")
+        case .starfall: return p("Güllenin ardından altın yıldızcıklar dökülür.", "A shower of golden sparkles falls behind the ball.")
+        case .fireworks: return p("Atışın düştüğü yerde rengârenk havai fişekler patlar.", "Colourful fireworks burst wherever your shot lands.")
+        case .hearts: return p("Kalp kristalin için dört renk: Zümrüt, Safir, Ametist ve Güneş Ateşi.", "Four colours for your heart crystal: Emerald, Sapphire, Amethyst and Sunfire.")
+        case .banners: return p("Kale bayrağın için dört arma: Aslan, Ejderha, Kartal ve Kurt.", "Four crests for your castle flag: Lion, Dragon, Eagle and Wolf.")
+        }
+    }
+    static func skin(_ s: Skin) -> String {
+        switch s {
+        case .classic: return p("Klasik", "Classic")
+        case .gold: return p("Altın", "Gold")
+        case .obsidian: return p("Obsidyen", "Obsidian")
+        case .marble: return p("Mermer", "Marble")
+        case .candy: return p("Şeker", "Candy")
+        case .royal: return p("Kraliyet", "Royal")
+        }
+    }
+    static func trail(_ t: Trail) -> String {
+        switch t {
+        case .none: return p("Standart", "Standard")
+        case .rainbow: return p("Gökkuşağı", "Rainbow")
+        case .lightning: return p("Şimşek", "Lightning")
+        case .starfall: return p("Yıldız Yağmuru", "Starfall")
+        case .royal: return p("Kraliyet", "Royal")
+        }
+    }
+    static func impact(_ i: ImpactEffect) -> String { i == .none ? p("Standart", "Standard") : p("Havai fişek", "Fireworks") }
+    static func gem(_ g: HeartGem) -> String {
+        switch g {
+        case .none: return p("Klasik", "Classic")
+        case .emerald: return p("Zümrüt", "Emerald")
+        case .sapphire: return p("Safir", "Sapphire")
+        case .amethyst: return p("Ametist", "Amethyst")
+        case .sunfire: return p("Güneş Ateşi", "Sunfire")
+        }
+    }
+    static func banner(_ b: Banner) -> String {
+        switch b {
+        case .none: return p("Sade", "Plain")
+        case .lion: return p("Aslan", "Lion")
+        case .dragon: return p("Ejderha", "Dragon")
+        case .eagle: return p("Kartal", "Eagle")
+        case .wolf: return p("Kurt", "Wolf")
+        }
+    }
+    static var castleSkin: String { p("Kale kaplaması", "Castle skin") }
+    static var trailTitle: String { p("Gülle izi", "Trail") }
+    static var impactTitle: String { p("Vuruş efekti", "Impact") }
+    static var heartGem: String { p("Kalp taşı", "Heart gem") }
+    static var bannerTitle: String { p("Sancak", "Banner") }
+    static var owned: String { p("Sende", "Owned") }
+    static var equip: String { p("Kullan", "Use") }
+    static var equipped: String { p("Kullanılıyor", "In use") }
+    static var restorePurchases: String { p("Satın alımları geri yükle", "Restore Purchases") }
+    static var restoreShort: String { p("Geri yükle", "Restore") }
+    static var shopLegal: String { p("Satın alımlar tek seferliktir ve yalnızca görünümü değiştirir; maçın gidişatını asla etkilemez.",
+                                     "Purchases are one-time and cosmetic only. They never change how a match plays.") }
+    static var shopLoading: String { p("Mağaza yükleniyor…", "Loading the shop…") }
+    static var shopOffline: String { p("Mağazaya şu an ulaşılamıyor.", "The shop can't be reached right now.") }
+    static func shopThanks(_ name: String) -> String { p("Teşekkürler! \(name) artık senin.", "Thank you! \(name) is yours.") }
+    static var shopPending: String { p("Satın alma onay bekliyor. Onaylanınca burada görünecek.", "Your purchase is waiting for approval. It will appear here once approved.") }
+    static func shopFailed(_ why: String) -> String { p("Satın alma tamamlanamadı: \(why)", "The purchase didn't go through: \(why)") }
+    static var shopUnavailable: String { p("Bu ürün şu an alınamıyor. Biraz sonra yeniden dene.", "This item isn't available right now. Please try again later.") }
+    static func restored(_ n: Int) -> String { p("\(n) satın alım geri yüklendi.", n == 1 ? "1 purchase restored." : "\(n) purchases restored.") }
+    static var nothingToRestore: String { p("Bu Apple Hesabı'nda geri yüklenecek satın alım yok.", "There's nothing to restore on this Apple Account.") }
+    static func restoreFailed(_ why: String) -> String { p("Geri yüklenemedi: \(why)", "Couldn't restore: \(why)") }
+    static var supporterTagline: String { p("Keepfall'u destekle", "Support Keepfall") }
+    static var bestValue: String { p("En iyi fırsat", "Best value") }
+    static var exclusive: String { p("Özel", "Exclusive") }
+    static var perkRoyalSkin: String { p("Özel Kraliyet kale kaplaması", "Exclusive Royal castle skin") }
+    static var perkRoyalTrail: String { p("Mor-altın Kraliyet izi", "Purple-and-gold Royal trail") }
+    static var perkCrown: String { p("Adının yanında bir taç", "A crown by your name") }
+    static var perkBanners: String { p("Dört sancağın hepsi", "All four banners") }
+    static var supporter: String { p("Destekçi", "Supporter") }
+    static var getMore: String { p("Daha fazlası", "Get more") }
+    static var myLookHint: String { p("Sahip olduğun görünümler. Kilitli olana dokununca mağazada açılır.", "What you own. Tap a locked one to see it in the shop.") }
 }

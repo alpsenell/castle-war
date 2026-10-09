@@ -267,6 +267,55 @@ enum Textures {
         return (albedo, normal)
     }()
 
+    /// Polished marble: near-white with soft grey veins that wander across the block.
+    static let marble: (albedo: UIImage, normal: UIImage) = {
+        let n = 256, warp = Fractal(base: 3, octaves: 4, seed: 211), cloud = Fractal(base: 6, octaves: 3, seed: 223), fine = Fractal(base: 24, octaves: 2, seed: 227)
+        func u(_ i: Int) -> Float { Float(i) / Float(n) }
+        func vein(_ x: Int, _ y: Int) -> Float {
+            let w = warp.value(u(x), u(y))
+            let a = abs(sin((u(x) * 2 + u(y) * 3 + w * 4.5) * .pi))
+            let b = abs(sin((u(x) * 5 - u(y) * 2 + w * 7) * .pi))
+            return pow(1 - a, 9) * 0.9 + pow(1 - b, 14) * 0.5
+        }
+        let albedo = image(n, n) { x, y in
+            let v = vein(x, y), c = cloud.value(u(x), u(y)), f = fine.value(u(x), u(y))
+            let base = 0.93 + (c - 0.5) * 0.08 + (f - 0.5) * 0.04
+            let k = max(0, base - v * 0.42)
+            return (k, k * 0.995, k * 0.99)
+        }
+        let normal = normalMap(n, strength: 1.2) { x, y in cloud.value(u(x), u(y)) * 0.3 - vein(x, y) * 0.2 }
+        return (albedo, normal)
+    }()
+
+    /// Hot cracks on black, as an emission map: the ember veins of obsidian stone.
+    static let embers: UIImage = {
+        let n = 256, web = Cells(cells: 6, seed: 233), heat = Fractal(base: 4, octaves: 3, seed: 239)
+        func u(_ i: Int) -> Float { Float(i) / Float(n) }
+        return image(n, n) { x, y in
+            let c = web.value(u(x), u(y)), h = heat.value(u(x), u(y))
+            let crack = max(0, 1 - (c.f2 - c.f1) * 30) * max(0, h * 1.6 - 0.45)
+            return (crack * 1.0, crack * 0.36, crack * 0.06)
+        }
+    }()
+
+    /// A four-pointed sparkle, white on clear, for starry trails and fireworks.
+    static let sparkle: UIImage = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 64)).image { ctx in
+        let g = ctx.cgContext
+        let colors = [UIColor(white: 1, alpha: 0.9).cgColor, UIColor(white: 1, alpha: 0).cgColor] as CFArray
+        let glow = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 1])!
+        g.drawRadialGradient(glow, startCenter: CGPoint(x: 32, y: 32), startRadius: 0, endCenter: CGPoint(x: 32, y: 32), endRadius: 14, options: [])
+        let path = CGMutablePath()
+        for i in 0..<8 {
+            let a = Double(i) * .pi / 4 - .pi / 2, r: Double = i % 2 == 0 ? 31 : 6
+            let p = CGPoint(x: 32 + r * cos(a), y: 32 + r * sin(a))
+            if i == 0 { path.move(to: p) } else { path.addLine(to: p) }
+        }
+        path.closeSubpath()
+        g.addPath(path)
+        g.setFillColor(UIColor.white.cgColor)
+        g.fillPath()
+    }
+
     private static var tinted: [String: UIImage] = [:]
 
     /// A near-white texture with a colour multiplied in, cached per colour.

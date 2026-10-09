@@ -62,6 +62,7 @@ struct RootView: View {
                     case .campaign: CampaignView()
                     case .achievements: AchievementsView()
                     case .party: PartyView()
+                    case .shop: ShopView()
                     }
                 case .lobby: LobbyView()
                 case .over: if game.over != nil { OverView() }
@@ -76,14 +77,18 @@ struct RootView: View {
             .onAppear {
                 game.viewSize = geo.size
                 Haptics.enabled = game.profile.haptics
+                Store.shared.start()
                 #if DEBUG
                 DebugJump.run(game)
                 #endif
             }
             .onChange(of: geo.size) { _, new in game.viewSize = new }
             .onChange(of: game.profile.haptics) { _, on in Haptics.enabled = on }
+            // A purchase, refund or restore changes what the player's castle can wear.
+            .onReceive(Store.shared.$owned) { _ in game.lookChanged() }
         }
         .environmentObject(game)
+        .environmentObject(Store.shared)
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
     }
@@ -162,6 +167,7 @@ struct HealthPlate: View {
     let charge: Double
     let streak: Int
     let shielded: Bool
+    var crown = false
     var body: some View {
         let whole = Int((pct * 100 + 1e-9).rounded(.down))
         let core = min(100, Int((heart * 100 - 1e-9).rounded(.up)))
@@ -171,6 +177,7 @@ struct HealthPlate: View {
                     Image(systemName: "flag.fill").font(.system(size: 9.u, weight: .black)).foregroundStyle(.white)
                 }
                 Text(name).font(Theme.display(16)).onWood().lineLimit(1).minimumScaleFactor(0.6)
+                if crown { CrownBadge(size: 13) }
                 if shielded {
                     Image(systemName: "shield.fill").font(Theme.icon(13, .bold)).foregroundStyle(Theme.shield).embossed(width: 0.8, drop: 1)
                         .accessibilityLabel(Tx.pickup(.shield))
@@ -212,11 +219,13 @@ struct SeatPlate: View {
     let active: Bool
     let mine: Bool
     let shielded: Bool
+    var crown = false
     var body: some View {
         VStack(alignment: .leading, spacing: 4.u) {
             HStack(spacing: 5.u) {
                 Crest(color: color, size: 17.u) { EmptyView() }
                 Text(name).font(Theme.display(12)).onWood(0.8).lineLimit(1).minimumScaleFactor(0.6)
+                if crown { CrownBadge(size: 10) }
                 if shielded { Image(systemName: "shield.fill").font(Theme.icon(10, .bold)).foregroundStyle(Theme.shield) }
                 Spacer(minLength: 2)
                 Image(systemName: out ? "heart.slash.fill" : "heart.fill").font(Theme.icon(10, .black))
@@ -501,7 +510,8 @@ struct HUDView: View {
     @ViewBuilder private func seatPlate(_ h: HUD, _ i: Int) -> some View {
         if i < h.names.count {
             SeatPlate(name: h.names[i], heart: h.heart[i], pct: h.pct[i], color: Theme.team(i), out: h.out.indices.contains(i) && h.out[i],
-                      active: h.turnSide == i && !h.finished, mine: h.me == i, shielded: h.shield.indices.contains(i) && h.shield[i])
+                      active: h.turnSide == i && !h.finished, mine: h.me == i, shielded: h.shield.indices.contains(i) && h.shield[i],
+                      crown: h.crowns.indices.contains(i) && h.crowns[i])
                 .allowsHitTesting(false)
         }
     }
@@ -511,12 +521,14 @@ struct HUDView: View {
             if let score = h.score {
                 ScorePlate(score: score, taken: h.shotsTaken, charge: h.charge[0], streak: h.streak[0]).allowsHitTesting(false)
             } else {
-                HealthPlate(name: h.names[0], pct: h.pct[0], heart: h.heart[0], color: Theme.red, charge: h.charge[0], streak: h.streak[0], shielded: h.shield[0]).allowsHitTesting(false)
+                HealthPlate(name: h.names[0], pct: h.pct[0], heart: h.heart[0], color: Theme.red, charge: h.charge[0], streak: h.streak[0], shielded: h.shield[0],
+                            crown: h.crowns.first ?? false).allowsHitTesting(false)
             }
             Spacer(minLength: 8)
             turnPlate(h)
             Spacer(minLength: 8)
-            HealthPlate(name: h.names[1], pct: h.pct[1], heart: h.heart[1], color: Theme.blue, charge: h.charge[1], streak: h.streak[1], shielded: h.shield[1]).allowsHitTesting(false)
+            HealthPlate(name: h.names[1], pct: h.pct[1], heart: h.heart[1], color: Theme.blue, charge: h.charge[1], streak: h.streak[1], shielded: h.shield[1],
+                        crown: h.crowns.count > 1 && h.crowns[1]).allowsHitTesting(false)
         }
     }
 
@@ -700,8 +712,18 @@ enum DebugJump {
         func later(_ t: Double = 1.2, _ work: @escaping () -> Void) { DispatchQueue.main.asyncAfter(deadline: .now() + t, execute: work) }
         if let p = value("-panel") {
             let panels: [String: Panel] = ["home": .home, "profile": .profile, "settings": .settings, "howTo": .howTo,
-                                           "campaign": .campaign, "achievements": .achievements, "party": .party]
+                                           "campaign": .campaign, "achievements": .achievements, "party": .party, "shop": .shop]
             if let panel = panels[p] { game.panel = panel }
+        }
+        // "-shopTab featured|skins|trails|hearts|look" picks the shop tab.
+        if let t = value("-shopTab"), let tab = ShopTab(rawValue: t) { game.shopTab = tab }
+        // "-storeBuy gold" (a product ID or its last part) starts that purchase at launch and logs the outcome.
+        if let id = value("-storeBuy") {
+            let full = Catalog.all.first { $0 == id || $0.hasSuffix("." + id) } ?? id
+            later(2) { Task { @MainActor in
+                let r = await Store.shared.buy(full)
+                print("STORE debug buy \(full) -> \(r); owned=\(Store.shared.owned.sorted())")
+            } }
         }
         guard let s = value("-screen") else { return }
         switch s {

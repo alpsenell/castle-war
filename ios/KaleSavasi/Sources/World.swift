@@ -83,18 +83,23 @@ enum Look {
     static let heartGlow: UInt32 = 0xff2f7d
 
     /// Crystal and glow colours of each heart type. Decoys copy the castle's own, so they still pass for the heart.
-    static func heartColors(_ h: HeartKind) -> (body: UInt32, glow: UInt32) {
+    /// A heart gem from the shop is a layer on top: it recolours the crystal, while a heart type
+    /// other than the plain one keeps its own glow, so living, aegis and titan still read as themselves.
+    static func heartColors(_ h: HeartKind, gem: HeartGem = .none) -> (body: UInt32, glow: UInt32) {
+        let own: (body: UInt32, glow: UInt32)
         switch h {
-        case .crystal: return (0xc2185b, heartGlow)
-        case .living: return (0x1f9d55, 0x5dff9a)
-        case .aegis: return (0x1f6fc2, 0x6fd0ff)
-        case .titan: return (0xb8690f, 0xffb43a)
+        case .crystal: own = (0xc2185b, heartGlow)
+        case .living: own = (0x1f9d55, 0x5dff9a)
+        case .aegis: own = (0x1f6fc2, 0x6fd0ff)
+        case .titan: own = (0xb8690f, 0xffb43a)
         }
+        guard gem != .none else { return own }
+        return h == .crystal ? gem.colors : (gem.colors.body, own.glow)
     }
 
     /// Glowing crystal for the heart, pulsing slowly.
-    static func heartMaterial(_ h: HeartKind = .crystal) -> SCNMaterial {
-        let c = heartColors(h)
+    static func heartMaterial(_ h: HeartKind = .crystal, gem: HeartGem = .none) -> SCNMaterial {
+        let c = heartColors(h, gem: gem)
         let m = solid(c.body, roughness: 0.18, metal: 0.2)
         m.emission.contents = UIColor(hex: c.glow)
         m.emission.intensity = 0.7
@@ -164,10 +169,15 @@ final class CastleBricks {
     let rotation: simd_quatf
     let origin: SIMD3<Float>
 
-    init(side: Int, design: BrickDesign, frame: CastleFrame) {
+    /// The owner's shop cosmetics: skin and heart gem for the bricks, crest for the flag.
+    let look: Cosmetics
+    var style: BrickStyle { look.style }
+
+    init(side: Int, design: BrickDesign, frame: CastleFrame, look: Cosmetics = .plain) {
         self.side = side
         self.design = design
         self.frame = frame
+        self.look = look
         home = CastleSnapshot(design: design)
         rotation = simd_quatf(angle: Float(frame.yaw), axis: SIMD3(0, 1, 0))
         origin = frame.corner.f
@@ -300,6 +310,9 @@ final class World {
     var onBreak: ((BrickMaterial) -> Void)?
     var onKnock: ((Float) -> Void)?
     var onCrystalLost: ((Int, Int) -> Void)?
+    /// Each seat's shop cosmetics, read when castles are built. Purely visual.
+    var looks: [Cosmetics] = []
+    func look(_ side: Int) -> Cosmetics { looks.indices.contains(side) ? looks[side] : .plain }
 
     init() {
         buildSky()
@@ -578,8 +591,9 @@ final class World {
     }
 
     /// Effects where a shot comes down: a splash, a thump of dust on the ground, sparks on stone.
-    func showLanding(_ res: ShotResult) {
+    func showLanding(_ res: ShotResult, impact: ImpactEffect = .none) {
         let p = res.pos.f
+        if impact == .fireworks, res.kind == .castle || res.kind == .ground { fireworks(at: p) }
         switch res.kind {
         case .out: break
         case .water: splash(at: p, big: true)
@@ -609,7 +623,7 @@ final class World {
 
     // MARK: Ball, preview, target, balloon, shield
 
-    func fireBall(from p: Vec3, dir d: Vec3, side: Int, style: BallStyle, ammo: Ammo, mega: Bool) {
+    func fireBall(from p: Vec3, dir d: Vec3, side: Int, style: BallStyle, ammo: Ammo, mega: Bool, trail: Trail = .none) {
         ball.simdPosition = p.f
         ball.isHidden = false
         ball.simdScale = SIMD3(repeating: mega ? 1.7 : 1)
@@ -625,7 +639,13 @@ final class World {
         ball.geometry?.materials = [m]
         ball.removeAllParticleSystems()
         let plain = !mega && ammo == .standard && style.id == 0
-        ball.addParticleSystem(World.makeTrail(color: colors.trail, size: mega ? 1.1 : 0.5, plain: plain))
+        // A shop trail replaces the standard ball's own; special shots keep theirs, since their
+        // trails tell the other player what is coming.
+        if ammo == .standard && trail != .none {
+            for ps in World.makeTrail(trail, size: mega ? 1.6 : 1) { ball.addParticleSystem(ps) }
+        } else {
+            ball.addParticleSystem(World.makeTrail(color: colors.trail, size: mega ? 1.1 : 0.5, plain: plain))
+        }
         cannons[side].kick = 1
         burst(at: p.f, colors: [0xffd84a, 0xff8a1e, 0xffffff], count: 28, speed: 16, life: 0.25, size: 1.2, accel: 0, cone: true, direction: d.f, additive: true)
         burst(at: p.f, colors: [0xe4e7ea, 0xb4b9be, 0x8d9297], count: 36, speed: 7, life: 1.8, size: 2.6, accel: 1.5, cone: true, direction: d.f, grow: 2.4)

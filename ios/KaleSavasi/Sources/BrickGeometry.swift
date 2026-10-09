@@ -19,19 +19,20 @@ enum BrickGeometry {
     static let variants = 3
 
     /// Geometry for a brick at rotation 0, centred on its own origin, in world units.
-    static func geometry(_ shape: BrickShape, _ material: BrickMaterial, heart: HeartKind = .crystal, variant: Int = 0, wear: Wear = .whole) -> SCNGeometry {
+    static func geometry(_ shape: BrickShape, _ material: BrickMaterial, heart: HeartKind = .crystal, variant: Int = 0, wear: Wear = .whole,
+                         style: BrickStyle = .plain) -> SCNGeometry {
         let v = material == .stone || material == .wood ? variant % variants : 0
-        let key = ((shape.rawValue * 8 + material.rawValue) * 8 + heart.rawValue) * 16 + v * 4 + wear.rawValue
+        let key = (((shape.rawValue * 8 + material.rawValue) * 8 + heart.rawValue) * 16 + v * 4 + wear.rawValue) * 64 + style.key
         if let g = cache[key] { return g }
         let g = mesh(shape, material).copy() as! SCNGeometry
-        g.materials = [look(material, heart: heart, variant: v, wear: wear, roof: shape == .coneRoof || shape == .pyramidRoof, decal: shape.isDecal)]
+        g.materials = [look(material, heart: heart, variant: v, wear: wear, roof: shape == .coneRoof || shape == .pyramidRoof, decal: shape.isDecal, style: style)]
         cache[key] = g
         return g
     }
 
     /// A node for a placed brick, positioned and rotated castle-locally.
-    static func node(for b: PlacedBrick, heart: HeartKind = .crystal) -> SCNNode {
-        let n = SCNNode(geometry: geometry(b.shape, b.material, heart: heart, variant: variant(of: b)))
+    static func node(for b: PlacedBrick, heart: HeartKind = .crystal, style: BrickStyle = .plain) -> SCNNode {
+        let n = SCNNode(geometry: geometry(b.shape, b.material, heart: heart, variant: variant(of: b), style: style))
         let c = b.center
         n.simdPosition = SIMD3(Float(c.x), Float(c.y), Float(c.z))
         n.simdOrientation = simd_quatf(angle: Float(b.rot) * .pi / 2, axis: SIMD3(0, 1, 0))
@@ -44,7 +45,7 @@ enum BrickGeometry {
 
     // MARK: Looks
 
-    private static func textured(_ albedo: UIImage, normal: UIImage?, roughness: CGFloat, metal: CGFloat = 0, bump: CGFloat = 1) -> SCNMaterial {
+    static func textured(_ albedo: UIImage, normal: UIImage?, roughness: CGFloat, metal: CGFloat = 0, bump: CGFloat = 1) -> SCNMaterial {
         let m = SCNMaterial()
         m.lightingModel = .physicallyBased
         m.diffuse.contents = albedo
@@ -59,12 +60,17 @@ enum BrickGeometry {
     private static let woodShades: [UInt32] = [0xa0703f, 0x8b5b34, 0xb08250]
 
     /// The material of a brick. Hearts and decoys share the castle's heart look until a decoy is found out.
-    static func look(_ m: BrickMaterial, heart: HeartKind = .crystal, variant: Int = 0, wear: Wear = .whole, roof: Bool = false, decal: Bool = false) -> SCNMaterial {
-        let key = (((m.rawValue * 8 + heart.rawValue) * 4 + variant) * 4 + wear.rawValue) * 4 + (roof ? 1 : 0) + (decal ? 2 : 0)
+    static func look(_ m: BrickMaterial, heart: HeartKind = .crystal, variant: Int = 0, wear: Wear = .whole, roof: Bool = false, decal: Bool = false,
+                     style: BrickStyle = .plain) -> SCNMaterial {
+        // Hearts and decoys take only the gem colour from the style; other bricks only the skin.
+        let styleKey = m.isCrystal ? style.gem.index : decal ? 0 : 8 + style.skin.index
+        let key = ((((m.rawValue * 8 + heart.rawValue) * 4 + variant) * 4 + wear.rawValue) * 4 + (roof ? 1 : 0) + (decal ? 2 : 0)) * 64 + styleKey
         if let hit = looks[key] { return hit }
         let mat: SCNMaterial
         if decal {
             mat = Look.moatWater
+        } else if style.skin != .classic && !m.isCrystal {
+            mat = skinLook(m, skin: style.skin, variant: variant, wear: wear, roof: roof)
         } else if roof && m != .ice {
             mat = textured(Textures.tint(Textures.shingles.albedo, "shingles", m == .stone ? 0x667280 : 0x9a4f33), normal: Textures.shingles.normal, roughness: 0.7, bump: 1.1)
         } else {
@@ -89,9 +95,9 @@ enum BrickGeometry {
                 mat = textured(Textures.tint(t.albedo, wear == .cracked ? "iron-cracked" : "iron", wear == .cracked ? 0x4c5157 : 0x707880), normal: t.normal,
                                roughness: wear == .cracked ? 0.8 : 0.42, metal: wear == .cracked ? 0.35 : 0.75, bump: 1.2)
             case .heart:
-                mat = wear == .revealed ? Look.solid(0x4a3a44, roughness: 0.6) : Look.heartMaterial(heart)
+                mat = wear == .revealed ? Look.solid(0x4a3a44, roughness: 0.6) : Look.heartMaterial(heart, gem: style.gem)
             case .decoy:
-                mat = wear == .revealed ? Look.solid(0x77707c, roughness: 0.55) : Look.heartMaterial(heart)
+                mat = wear == .revealed ? Look.solid(0x77707c, roughness: 0.55) : Look.heartMaterial(heart, gem: style.gem)
             }
         }
         looks[key] = mat
@@ -156,13 +162,13 @@ enum BrickGeometry {
     }
 
     /// A chunk of a broken brick, `size` world units across.
-    static func fragment(size: SIMD3<Float>, material: BrickMaterial, heart: HeartKind, variant: Int) -> SCNGeometry {
+    static func fragment(size: SIMD3<Float>, material: BrickMaterial, heart: HeartKind, variant: Int, style: BrickStyle = .plain) -> SCNGeometry {
         let q = SIMD3<Int>(Int(size.x * 4), Int(size.y * 4), Int(size.z * 4))
-        let key = ((q.x * 32 + q.y) * 32 + q.z) * 64 + material.rawValue * 8 + variant
+        let key = ((((q.x * 32 + q.y) * 32 + q.z) * 64 + material.rawValue * 8 + variant) * 8 + heart.rawValue) * 64 + style.key
         if let g = fragments[key] { return g }
         let g = SCNBox(width: CGFloat(size.x), height: CGFloat(size.y), length: CGFloat(size.z), chamferRadius: CGFloat(min(size.x, size.y, size.z) * 0.18))
         g.chamferSegmentCount = 1
-        g.materials = [look(material, heart: heart, variant: variant)]
+        g.materials = [look(material, heart: heart, variant: variant, style: style)]
         fragments[key] = g
         return g
     }

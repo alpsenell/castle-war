@@ -7,14 +7,18 @@ import SwiftUI
 /// Level, trophies and win streak at a glance; opens the full profile.
 struct ProfileStrip: View {
     @EnvironmentObject var game: GameController
+    @EnvironmentObject var store: Store
     var body: some View {
         let p = game.profile
         Button { game.panel = .profile } label: {
             HStack(spacing: 8.u) {
                 LevelBadge(level: p.level, size: 38)
                 VStack(alignment: .leading, spacing: 3.u) {
-                    Text(p.name.isEmpty ? Tx.level(p.level) : p.name).font(Theme.display(14)).foregroundStyle(Theme.cream)
-                        .embossed(width: 1, drop: 1.5).lineLimit(1).minimumScaleFactor(0.7)
+                    HStack(spacing: 4.u) {
+                        Text(p.name.isEmpty ? Tx.level(p.level) : p.name).font(Theme.display(14)).foregroundStyle(Theme.cream)
+                            .embossed(width: 1, drop: 1.5).lineLimit(1).minimumScaleFactor(0.7)
+                        if store.owns(Catalog.supporter) { CrownBadge(size: 12) }
+                    }
                     Meter(value: p.levelProgress, color: Theme.blue, height: 7).frame(width: 104.u)
                 }
                 Pill(text: "\(p.trophies)", icon: "trophy.fill", tint: Color(hex: p.league.tint).lighter(0.25))
@@ -217,6 +221,8 @@ struct MenuView: View {
         HStack(spacing: 10.u) {
             ProfileStrip()
             Spacer(minLength: 8)
+            Button { game.openShop() } label: { Label(Tx.shop, systemImage: "bag.fill") }
+                .buttonStyle(ThemeButtonStyle(tone: .gold, size: 15, fill: false, compact: true))
             Button { game.openBuilder() } label: { Label(Tx.buildCastle, systemImage: "hammer.fill") }
                 .buttonStyle(ThemeButtonStyle(tone: .wood, size: 15, fill: false, compact: true))
             Button { game.panel = .settings } label: { Image(systemName: "gearshape.fill").font(Theme.icon(17, .heavy)) }
@@ -321,10 +327,16 @@ struct ProfileView: View {
                         ForEach(BallStyle.all) { b in ballSlot(b, p) }
                     }
                 }
-                Button { game.panel = .achievements } label: {
-                    Label(Tx.achievementCount(Achievement.allCases.filter { p.has($0) }.count, Achievement.allCases.count), systemImage: "rosette")
+                HStack(spacing: 10.u) {
+                    Button { game.panel = .achievements } label: {
+                        Label(Tx.achievementCount(Achievement.allCases.filter { p.has($0) }.count, Achievement.allCases.count), systemImage: "rosette")
+                    }
+                    .buttonStyle(ThemeButtonStyle(tone: .gold, size: 15, fill: false, compact: true))
+                    Button { game.openShop(.look) } label: { Label(Tx.appearance, systemImage: "paintpalette.fill") }
+                        .buttonStyle(ThemeButtonStyle(tone: .purple, size: 15, fill: false, compact: true))
+                    Button { game.openShop() } label: { Label(Tx.shop, systemImage: "bag.fill") }
+                        .buttonStyle(ThemeButtonStyle(tone: .wood, size: 15, fill: false, compact: true))
                 }
-                .buttonStyle(ThemeButtonStyle(tone: .gold, size: 15, fill: false, compact: true))
             }
         }
     }
@@ -645,6 +657,14 @@ struct LobbyView: View {
                     Medallion(symbol: game.lobby.kind == .gameCenter || game.lobby.kind == .partyGameCenter ? "globe.europe.africa.fill" : "wifi",
                               tone: .blue, size: 44)
                     CardTitle(text: game.lobby.isParty ? Tx.partyTitle : game.lobby.kind == .gameCenter ? Tx.gameCenterTitle : Tx.nearbyTitle, size: 24)
+                    Spacer(minLength: 6)
+                    HStack(spacing: 5.u) {
+                        LevelBadge(level: game.profile.level, size: 26)
+                        Text(game.profile.name).font(Theme.display(13)).foregroundStyle(Theme.cream).embossed(width: 0.8, drop: 1.2).lineLimit(1)
+                        if game.myLook.supporter { CrownBadge(size: 12) }
+                    }
+                    .padding(.horizontal, 8.u).padding(.vertical, 3.u)
+                    .background(WoodPanel(radius: 12.u, drop: 2))
                 }
                 HStack(spacing: 10.u) {
                     if game.lobby.busy { ProgressView().tint(Theme.woodDark).controlSize(.regular) }
@@ -778,12 +798,13 @@ struct RewardPanel: View {
 struct CompareTable: View {
     let names: [String]
     let stats: [MatchStats]
+    var crowns: [Bool] = []
     var body: some View {
         Grid(horizontalSpacing: 10.u, verticalSpacing: 5.u) {
             GridRow {
-                name(names[0], Theme.red)
+                name(names[0], Theme.red, crowns.first ?? false)
                 Text("")
-                name(names[1], Theme.blue)
+                name(names[1], Theme.blue, crowns.count > 1 && crowns[1])
             }
             Divider().overlay(Theme.parchmentEdge).gridCellUnsizedAxes(.horizontal)
             row(Tx.accuracy, stats[0].accuracy, stats[1].accuracy) { Tx.pct($0) }
@@ -795,10 +816,11 @@ struct CompareTable: View {
         .background(InsetWell(radius: 12.u))
     }
 
-    private func name(_ text: String, _ color: Color) -> some View {
+    private func name(_ text: String, _ color: Color, _ crown: Bool) -> some View {
         HStack(spacing: 4.u) {
             Crest(color: color, size: 15.u) { EmptyView() }
             Text(text).font(Theme.display(13)).foregroundStyle(color.darker(0.1)).lineLimit(1).minimumScaleFactor(0.6)
+            if crown { CrownBadge(size: 11) }
         }
     }
 
@@ -882,7 +904,7 @@ struct OverView: View {
                             }
                         }
                     } else if let o, let mine = o.stats, let theirs = o.rivalStats, o.names.count == 2 {
-                        CompareTable(names: o.names, stats: o.side == 0 ? [mine, theirs] : [theirs, mine])
+                        CompareTable(names: o.names, stats: o.side == 0 ? [mine, theirs] : [theirs, mine], crowns: o.crowns)
                     }
                     if let r = o?.reward { RewardPanel(reward: r, showTrophies: o?.isSiege != true).frame(maxWidth: .infinity) }
                 }
