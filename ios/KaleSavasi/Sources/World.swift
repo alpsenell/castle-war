@@ -371,12 +371,15 @@ final class World {
         sun.castsShadow = true
         sun.shadowColor = UIColor(white: 0, alpha: 0.55)
         sun.shadowMapSize = CGSize(width: 2048, height: 2048)
-        sun.shadowSampleCount = 8
-        sun.shadowRadius = 2.5
-        sun.shadowBias = 2
+        // Shadows only need to reach the castles in view. A shorter reach split into finer near
+        // cascades keeps them crisp when the camera closes in on a collapsing wall.
+        sun.shadowSampleCount = 16
+        sun.shadowRadius = 1.5
+        sun.shadowBias = 1.5
         sun.automaticallyAdjustsShadowProjection = true
-        sun.maximumShadowDistance = 260
-        sun.shadowCascadeCount = 3
+        sun.maximumShadowDistance = 170
+        sun.shadowCascadeCount = 4
+        sun.shadowCascadeSplittingFactor = 0.6
         let sn = SCNNode(); sn.light = sun
         sn.simdPosition = World.sunDirection * 120
         sn.look(at: SCNVector3(0, 0, 0))

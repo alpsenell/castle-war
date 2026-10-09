@@ -291,6 +291,7 @@ extension World: BrickPhysics {
         body.collisionBitMask = Phys.ground | Phys.brick
         body.contactTestBitMask = Phys.brick
         b.physicsBody = body
+        b.castsShadow = false    // it can bounce far off the field; see the note on fragments
         b.pierce = pierce
         b.lastVelocity = velocity
         b.born = clock
@@ -489,6 +490,9 @@ extension World: BrickPhysics {
             let world = t * SIMD4(off.x, off.y, off.z, 1)
             let geo = BrickGeometry.fragment(size: simd_max(piece, SIMD3(repeating: 0.25)), material: m, heart: v.design.heart, variant: BrickGeometry.variant(of: b))
             let chip = SCNNode(geometry: geo)
+            // Fragments fly far and fast; as shadow casters they would stretch the sun's shadow
+            // map over a much larger area and blur every shadow until they fade.
+            chip.castsShadow = false
             chip.simdPosition = SIMD3(world.x, world.y, world.z)
             chip.simdOrientation = q
             let body = SCNPhysicsBody(type: .dynamic, shape: SCNPhysicsShape(geometry: geo, options: [.type: SCNPhysicsShape.ShapeType.boundingBox]))
